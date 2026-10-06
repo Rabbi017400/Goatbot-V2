@@ -62,8 +62,10 @@ function listenMqtt(client, formatter, callback, options) {
     if (!stopped) onPermanentError(err);
   });
 
-  // Mark the session as foreground so typing/presence flows.
-  client.sendTasks([reportAppStateTask(1)]).catch(() => {});
+  // Mark the session as foreground so typing/presence flows (unless disabled).
+  if (client.safety && client.safety.presence) {
+    client.sendTasks([reportAppStateTask(1)]).catch(() => {});
+  }
 
   // Keep fb_dtsg/jazoest fresh for long-running bot accounts. Facebook rejects
   // stale tokens with "Please try closing and re-opening your browser window".

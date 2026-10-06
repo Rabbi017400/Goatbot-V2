@@ -140,6 +140,19 @@
     "selfListenEvent": true,
     "autoMarkDelivery": false,
     "autoReconnect": false,
+    "safety": {
+      "enabled": true,
+      "typing": true,
+      "presence": true,
+      "warmupMs": 3000,
+      "minActionDelayMs": 400,
+      "maxActionDelayMs": 1200,
+      "maxActionsPerWindow": 25,
+      "maxBurstPerThreadPerWindow": 12,
+      "circuitBreakerThreshold": 5,
+      "circuitBreakerCooldownMs": 120000,
+      "notes": "Safety/anti-suspension guard is ON by default. Set enabled to false to turn it off. typing sends the typing indicator on message sends; presence reports the session as active. Raise the delays/limits only if you know the account can handle it."
+    },
     "notes": "Document here: https://github.com/ntkhang03/fb-chat-api/blob/master/DOCS.md#apisetoptionsoptions "
   }
 }

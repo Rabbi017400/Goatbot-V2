@@ -78,7 +78,12 @@ async function sendMessage(client, msg, threadID, options = {}) {
 
   const otid = generateOfflineThreadingID();
   if (client.safety && client.safety.enabled && typeof body === "string" && body) {
-    await client.safety.simulateTyping(targetThread, body, options.isGroup);
+    let isGroup = options.isGroup;
+    if (isGroup === undefined && client.formatter && typeof client.formatter.getThreadMeta === "function") {
+      const meta = client.formatter.getThreadMeta(targetThread);
+      if (meta && meta.isGroup !== undefined) isGroup = meta.isGroup;
+    }
+    await client.safety.simulateTyping(targetThread, body, isGroup);
   }
   const task = sendMessageTask(client, {
     threadID: Number(targetThread),

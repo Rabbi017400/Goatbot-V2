@@ -5,16 +5,17 @@ const { typingTask } = require("./tasks");
 
 const DEFAULT_SAFETY = {
   enabled: true,
-  warmupMs: 2000,
-  minActionDelayMs: 300,
-  maxActionDelayMs: 900,
+  warmupMs: 3000,
+  minActionDelayMs: 400,
+  maxActionDelayMs: 1200,
   windowMs: 60000,
-  maxActionsPerWindow: 40,
-  maxBurstPerThreadPerWindow: 20,
-  typing: false,
+  maxActionsPerWindow: 25,
+  maxBurstPerThreadPerWindow: 12,
+  typing: true,
   typingMsPerChar: 45,
   typingMinMs: 350,
   typingMaxMs: 5000,
+  presence: true,
   reconnectJitter: 0.3,
   circuitBreakerThreshold: 5,
   circuitBreakerCooldownMs: 120000,
@@ -39,6 +40,10 @@ class Safety {
 
   get enabled() {
     return this.options.enabled === true;
+  }
+
+  get presence() {
+    return this.options.presence === true;
   }
 
   update(options) {
