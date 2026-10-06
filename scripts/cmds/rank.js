@@ -1,4 +1,4 @@
-const Canvas = require("../../func/canvasCompat.js");
+const Canvas = require("canvas");
 const { uploadZippyshare } = global.utils;
 
 const defaultFontName = "BeVietnamPro-SemiBold";
@@ -6,12 +6,8 @@ const defaultPathFontName = `${__dirname}/assets/font/BeVietnamPro-SemiBold.ttf`
 const { randomString } = global.utils;
 const percentage = total => total / 100;
 
-Canvas.registerFont(`${__dirname}/assets/font/BeVietnamPro-Bold.ttf`, {
-	family: "BeVietnamPro-Bold"
-});
-Canvas.registerFont(defaultPathFontName, {
-	family: defaultFontName
-});
+Canvas.GlobalFonts.registerFromPath(`${__dirname}/assets/font/BeVietnamPro-Bold.ttf`, "BeVietnamPro-Bold");
+Canvas.GlobalFonts.registerFromPath(defaultPathFontName, defaultFontName);
 
 let deltaNext;
 const expToLevel = (exp, deltaNextLevel = deltaNext) => Math.floor((1 + Math.sqrt(1 + 8 * exp / deltaNextLevel)) / 2);
@@ -222,9 +218,7 @@ class RankCard {
 	 * 	.registerFont("path/to/font.ttf", "FontName");
 	 */
 	registerFont(path, name) {
-		Canvas.registerFont(path, {
-			family: name
-		});
+		Canvas.GlobalFonts.registerFromPath(path, name);
 		return this;
 	}
 

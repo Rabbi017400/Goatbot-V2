@@ -1,16 +1,10 @@
 const axios = require("axios");
 const moment = require("moment-timezone");
-const Canvas = require("../../func/canvasCompat.js");
+const Canvas = require("canvas");
 const fs = require("fs-extra");
 
-Canvas.registerFont(
-	__dirname + "/assets/font/BeVietnamPro-SemiBold.ttf", {
-	family: "BeVietnamPro-SemiBold"
-});
-Canvas.registerFont(
-	__dirname + "/assets/font/BeVietnamPro-Regular.ttf", {
-	family: "BeVietnamPro-Regular"
-});
+Canvas.GlobalFonts.registerFromPath(__dirname + "/assets/font/BeVietnamPro-SemiBold.ttf", "BeVietnamPro-SemiBold");
+Canvas.GlobalFonts.registerFromPath(__dirname + "/assets/font/BeVietnamPro-Regular.ttf", "BeVietnamPro-Regular");
 
 function convertFtoC(F) {
 	return Math.floor((F - 32) / 1.8);
