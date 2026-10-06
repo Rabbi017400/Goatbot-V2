@@ -192,6 +192,11 @@ module.exports = async function (databaseType, threadModel, api, fakeGraphql) {
 					});
 				}
 				threadInfo = threadInfo || await api.getThreadInfo(threadID);
+				if (!threadInfo)
+					throw new CustomError({
+						name: "THREAD_INFO_NOT_FOUND",
+						message: `Can't get info of thread with id "${threadID}"`
+					});
 				const { threadName, userInfo, adminIDs } = threadInfo;
 				const newAdminsIDs = adminIDs.reduce(function (_, b) {
 					_.push(b.id);
@@ -268,6 +273,11 @@ module.exports = async function (databaseType, threadModel, api, fakeGraphql) {
 					}
 					const threadInfo = await get_(threadID);
 					newThreadInfo = newThreadInfo || await api.getThreadInfo(threadID);
+					if (!newThreadInfo)
+						return reject(new CustomError({
+							name: "THREAD_INFO_NOT_FOUND",
+							message: `Can't get info of thread with id "${threadID}"`
+						}));
 					const { userInfo, adminIDs, nicknames } = newThreadInfo;
 					let oldMembers = threadInfo.members;
 					const newMembers = [];

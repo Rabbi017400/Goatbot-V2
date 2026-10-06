@@ -205,7 +205,7 @@ module.exports = async (api) => {
 	app.get("/stats", async (req, res) => {
 		let fcaVersion;
 		try {
-			fcaVersion = require("fb-chat-api/package.json").version;
+			fcaVersion = require("../fca-meta/package.json").version;
 		}
 		catch (e) {
 			fcaVersion = "unknown";

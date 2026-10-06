@@ -47,9 +47,20 @@ function validJSON(pathDir) {
 }
 
 const { NODE_ENV } = process.env;
-const dirConfig = path.normalize(`${__dirname}/config${['production', 'development'].includes(NODE_ENV) ? '.dev.json' : '.json'}`);
-const dirConfigCommands = path.normalize(`${__dirname}/configCommands${['production', 'development'].includes(NODE_ENV) ? '.dev.json' : '.json'}`);
-const dirAccount = path.normalize(`${__dirname}/account${['production', 'development'].includes(NODE_ENV) ? '.dev.txt' : '.txt'}`);
+
+// Resolve a config/account file. A `.dev.<ext>` variant is used only in
+// development or when no base file exists, so production never requires a
+// `.dev` file just to start.
+function resolveFile(baseName, ext) {
+	const base = path.normalize(`${__dirname}/${baseName}${ext}`);
+	const dev = path.normalize(`${__dirname}/${baseName}.dev${ext}`);
+	const useDev = NODE_ENV === 'development' ? fs.existsSync(dev) || !fs.existsSync(base) : !fs.existsSync(base) && fs.existsSync(dev);
+	return useDev ? dev : base;
+}
+
+const dirConfig = resolveFile('config', '.json');
+const dirConfigCommands = resolveFile('configCommands', '.json');
+const dirAccount = resolveFile('account', '.txt');
 
 for (const pathDir of [dirConfig, dirConfigCommands]) {
 	try {
@@ -217,34 +228,20 @@ if (config.autoRestart) {
 }
 
 (async () => {
-	// ———————————————— SETUP MAIL ———————————————— //
-	const { gmailAccount } = config.credentials;
-	const { email, clientId, clientSecret, refreshToken } = gmailAccount;
-	const OAuth2 = google.auth.OAuth2;
-	const OAuth2_client = new OAuth2(clientId, clientSecret);
-	OAuth2_client.setCredentials({ refresh_token: refreshToken });
+	// ———————————————— SETUP MAIL (OPTIONAL) ———————————————— //
+	// Google credentials are optional: the bot runs with or without them.
+	// A missing/expired token disables the mail + Drive helpers instead of
+	// crashing startup.
+	const { gmailAccount } = config.credentials || {};
+	const { email, clientId, clientSecret, refreshToken } = gmailAccount || {};
+	const isGoogleConfigured = Boolean(email && clientId && clientSecret && refreshToken);
+	let transporter = null;
 	let accessToken;
-	try {
-		accessToken = await OAuth2_client.getAccessToken();
-	}
-	catch (err) {
-		throw new Error(getText("Goat", "googleApiTokenExpired"));
-	}
-	const transporter = nodemailer.createTransport({
-		host: 'smtp.gmail.com',
-		service: 'Gmail',
-		auth: {
-			type: 'OAuth2',
-			user: email,
-			clientId,
-			clientSecret,
-			refreshToken,
-			accessToken
-		}
-	});
 
 	async function sendMail({ to, subject, text, html, attachments }) {
-		const transporter = nodemailer.createTransport({
+		if (!transporter)
+			throw new Error("Mail is not configured (Google credentials are optional and currently unset).");
+		const mailTransporter = nodemailer.createTransport({
 			host: 'smtp.gmail.com',
 			service: 'Gmail',
 			auth: {
@@ -264,27 +261,66 @@ if (config.autoRestart) {
 			html,
 			attachments
 		};
-		const info = await transporter.sendMail(mailOptions);
+		const info = await mailTransporter.sendMail(mailOptions);
 		return info;
+	}
+
+	if (isGoogleConfigured) {
+		try {
+			const OAuth2 = google.auth.OAuth2;
+			const OAuth2_client = new OAuth2(clientId, clientSecret);
+			OAuth2_client.setCredentials({ refresh_token: refreshToken });
+			accessToken = await OAuth2_client.getAccessToken();
+			transporter = nodemailer.createTransport({
+				host: 'smtp.gmail.com',
+				service: 'Gmail',
+				auth: {
+					type: 'OAuth2',
+					user: email,
+					clientId,
+					clientSecret,
+					refreshToken,
+					accessToken
+				}
+			});
+		}
+		catch (err) {
+			utils.log.warn("SETUP MAIL", getText("Goat", "googleApiTokenExpired"));
+		}
+	}
+	else {
+		utils.log.info("SETUP MAIL", "Google credentials not configured, mail and Google Drive features are disabled (optional).");
 	}
 
 	global.utils.sendMail = sendMail;
 	global.utils.transporter = transporter;
 
-	// ———————————————— CHECK VERSION ———————————————— //
-	const { data: { version } } = await axios.get("https://raw.githubusercontent.com/ntkhang03/Goat-Bot-V2/main/package.json");
-	const currentVersion = require("./package.json").version;
-	if (compareVersion(version, currentVersion) === 1)
-		utils.log.master("NEW VERSION", getText(
-			"Goat",
-			"newVersionDetected",
-			colors.gray(currentVersion),
-			colors.hex("#eb6a07", version),
-			colors.hex("#eb6a07", "node update")
-		));
-	// —————————— CHECK FOLDER GOOGLE DRIVE —————————— //
-	const parentIdGoogleDrive = await utils.drive.checkAndCreateParentFolder("GoatBot");
-	utils.drive.parentID = parentIdGoogleDrive;
+	// ———————————————— CHECK VERSION (OPTIONAL) ———————————————— //
+	try {
+		const { data: { version } } = await axios.get("https://raw.githubusercontent.com/ntkhang03/Goat-Bot-V2/main/package.json", { timeout: 15000 });
+		const currentVersion = require("./package.json").version;
+		if (compareVersion(version, currentVersion) === 1)
+			utils.log.master("NEW VERSION", getText(
+				"Goat",
+				"newVersionDetected",
+				colors.gray(currentVersion),
+				colors.hex("#eb6a07", version),
+				colors.hex("#eb6a07", "node update")
+			));
+	}
+	catch (err) {
+		utils.log.warn("CHECK VERSION", "Can't check for new version (network unavailable).");
+	}
+	// —————————— CHECK FOLDER GOOGLE DRIVE (OPTIONAL) —————————— //
+	if (isGoogleConfigured) {
+		try {
+			const parentIdGoogleDrive = await utils.drive.checkAndCreateParentFolder("GoatBot");
+			utils.drive.parentID = parentIdGoogleDrive;
+		}
+		catch (err) {
+			utils.log.warn("GOOGLE DRIVE", "Can't prepare Google Drive folder, Drive features are disabled.");
+		}
+	}
 	// ———————————————————— LOGIN ———————————————————— //
 	require(`./bot/login/login${NODE_ENV === 'development' ? '.dev.js' : '.js'}`);
 })();

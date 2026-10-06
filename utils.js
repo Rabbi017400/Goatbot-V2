@@ -16,27 +16,23 @@ const { isHexColor, colors } = require("./func/colors.js");
 const Prism = require("./func/prism.js");
 
 const { config } = global.GoatBot;
-const { gmailAccount } = config.credentials;
-const { clientId, clientSecret, refreshToken, apiKey: googleApiKey } = gmailAccount;
-if (!clientId) {
-	log.err("CREDENTIALS", `Please provide a valid clientId in file ${path.normalize(global.client.dirConfig)}`);
-	process.exit();
-}
-if (!clientSecret) {
-	log.err("CREDENTIALS", `Please provide a valid clientSecret in file ${path.normalize(global.client.dirConfig)}`);
-	process.exit();
-}
-if (!refreshToken) {
-	log.err("CREDENTIALS", `Please provide a valid refreshToken in file ${path.normalize(global.client.dirConfig)}`);
-	process.exit();
+const { gmailAccount } = config.credentials || {};
+const { clientId, clientSecret, refreshToken, apiKey: googleApiKey } = gmailAccount || {};
+
+// Google credentials are optional. When they are not configured the mail/Drive
+// helpers are disabled instead of stopping the bot from starting.
+const isGoogleConfigured = Boolean(clientId && clientSecret && refreshToken && gmailAccount.email);
+if (!isGoogleConfigured) {
+	log.warn("CREDENTIALS", `Google credentials are not configured in ${path.normalize(global.client.dirConfig)}, the mail and Google Drive features are disabled (optional).`);
 }
 
-const oauth2ClientForGGDrive = new google.auth.OAuth2(clientId, clientSecret, "https://developers.google.com/oauthplayground");
-oauth2ClientForGGDrive.setCredentials({ refresh_token: refreshToken });
-const driveApi = google.drive({
+const oauth2ClientForGGDrive = isGoogleConfigured ? new google.auth.OAuth2(clientId, clientSecret, "https://developers.google.com/oauthplayground") : null;
+if (oauth2ClientForGGDrive)
+	oauth2ClientForGGDrive.setCredentials({ refresh_token: refreshToken });
+const driveApi = isGoogleConfigured ? google.drive({
 	version: 'v3',
 	auth: oauth2ClientForGGDrive
-});
+}) : null;
 const word = [
 	'A', 'Á', 'À', 'Ả', 'Ã', 'Ạ', 'a', 'á', 'à', 'ả', 'ã', 'ạ',
 	'Ă', 'Ắ', 'Ằ', 'Ẳ', 'Ẵ', 'Ặ', 'ă', 'ắ', 'ằ', 'ẳ', 'ẵ', 'ặ',
@@ -790,10 +786,17 @@ async function uploadZippyshare(stream) {
 	return res.data;
 }
 
+function requireGoogleDrive() {
+	if (!isGoogleConfigured)
+		throw new Error("Google Drive is not configured (Google credentials are optional and currently unset).");
+	return driveApi;
+}
+
 const drive = {
 	default: driveApi,
 	parentID: "",
 	async uploadFile(fileName, mimeType, file) {
+		requireGoogleDrive();
 		if (!file && typeof fileName === "string") {
 			file = mimeType;
 			mimeType = undefined;
@@ -820,6 +823,7 @@ const drive = {
 	},
 
 	async deleteFile(id) {
+		requireGoogleDrive();
 		if (!id || typeof id !== "string")
 			throw new Error('The first argument (id) must be a string');
 		try {
@@ -840,6 +844,7 @@ const drive = {
 	},
 
 	async getFile(id, responseType) {
+		requireGoogleDrive();
 		if (!id || typeof id !== "string")
 			throw new Error('The first argument (id) must be a string');
 		if (!responseType)
@@ -867,6 +872,7 @@ const drive = {
 	},
 
 	async getFileName(id) {
+		requireGoogleDrive();
 		if (!id || typeof id !== "string")
 			throw new Error('The first argument (id) must be a string');
 		const { fileNames: tempFileNames } = global.temp.filesOfGoogleDrive;
@@ -886,6 +892,7 @@ const drive = {
 	},
 
 	async makePublic(id) {
+		requireGoogleDrive();
 		if (!id || typeof id !== "string")
 			throw new Error('The first argument (id) must be a string');
 		try {
@@ -906,6 +913,7 @@ const drive = {
 	},
 
 	async checkAndCreateParentFolder(folderName) {
+		requireGoogleDrive();
 		if (!folderName || typeof folderName !== "string")
 			throw new Error('The first argument (folderName) must be a string');
 		let parentID;

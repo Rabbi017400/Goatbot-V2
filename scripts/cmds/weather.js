@@ -1,6 +1,6 @@
 const axios = require("axios");
 const moment = require("moment-timezone");
-const Canvas = require("canvas");
+const Canvas = require("../../func/canvasCompat.js");
 const fs = require("fs-extra");
 
 Canvas.registerFont(

@@ -2,7 +2,7 @@ const moment = require("moment-timezone");
 const fs = require("fs-extra");
 const axios = require("axios");
 const cheerio = require("cheerio");
-const Canvas = require("canvas");
+const Canvas = require("../../func/canvasCompat.js");
 const https = require("https");
 const agent = new https.Agent({
 	rejectUnauthorized: false

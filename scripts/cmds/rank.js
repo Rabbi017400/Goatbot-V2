@@ -1,4 +1,4 @@
-const Canvas = require("canvas");
+const Canvas = require("../../func/canvasCompat.js");
 const { uploadZippyshare } = global.utils;
 
 const defaultFontName = "BeVietnamPro-SemiBold";
