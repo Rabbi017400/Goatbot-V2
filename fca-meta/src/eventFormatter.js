@@ -40,6 +40,37 @@ class EventFormatter {
     this._adminSnapshot = new Map();
     this._addedSnapshot = new Map();
     this.pendingAdminOps = new Map();
+    this._seenMessages = new Map();
+    this._seenReactions = new Map();
+  }
+
+  _isDuplicateMessage(messageID, kind) {
+    if (!messageID) return false;
+    const key = (kind || "message") + ":" + String(messageID);
+    const now = Date.now();
+    const last = this._seenMessages.get(key);
+    if (last !== undefined && now - last < 60000) return true;
+    this._seenMessages.set(key, now);
+    if (this._seenMessages.size > 5000) {
+      for (const [k, t] of this._seenMessages) {
+        if (now - t > 600000) this._seenMessages.delete(k);
+      }
+    }
+    return false;
+  }
+
+  _isDuplicateReaction(key) {
+    if (!key) return false;
+    const now = Date.now();
+    const last = this._seenReactions.get(key);
+    if (last !== undefined && now - last < 3000) return true;
+    this._seenReactions.set(key, now);
+    if (this._seenReactions.size > 2000) {
+      for (const [k, t] of this._seenReactions) {
+        if (now - t > 60000) this._seenReactions.delete(k);
+      }
+    }
+    return false;
   }
 
   setUserName(userID, name) {
@@ -102,10 +133,12 @@ class EventFormatter {
 
     for (const msg of [...(table.LSUpsertMessage || []), ...(table.LSInsertMessage || []), ...(table.LSDeleteThenInsertMessage || [])]) {
       if (msg.IsUnsent) continue;
+      if (this._isDuplicateMessage(msg.MessageId, "message")) continue;
       const evt = this.formatMessage(msg);
       if (evt) events.push(evt);
     }
     for (const del of table.LSDeleteMessage || []) {
+      if (this._isDuplicateMessage(del.MessageId, "unsend")) continue;
       events.push({
         type: "message_unsend",
         threadID: String(del.ThreadKey),
@@ -173,6 +206,7 @@ class EventFormatter {
       });
     }
     for (const reaction of table.LSUpsertReaction || []) {
+      if (this._isDuplicateReaction(`${reaction.ThreadKey}|${reaction.MessageId}|${reaction.ActorId}|${reaction.Reaction}`)) continue;
       events.push({
         type: "message_reaction",
         threadID: String(reaction.ThreadKey),
@@ -185,6 +219,7 @@ class EventFormatter {
       });
     }
     for (const reaction of table.LSDeleteReaction || []) {
+      if (this._isDuplicateReaction(`${reaction.ThreadKey}|${reaction.MessageId}|${reaction.ActorId}|del`)) continue;
       events.push({
         type: "message_reaction",
         threadID: String(reaction.ThreadKey),
@@ -196,6 +231,7 @@ class EventFormatter {
       });
     }
     for (const reaction of table.LSUpdateOrInsertReactionV2 || []) {
+      if (this._isDuplicateReaction(`${reaction.ThreadKey}|${reaction.MessageID}|v2|${reaction.ReactionLiteral}`)) continue;
       events.push({
         type: "message_reaction",
         threadID: String(reaction.ThreadKey),

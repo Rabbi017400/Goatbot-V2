@@ -94,7 +94,7 @@ function buildApi(client, globalOptions) {
   // --- Messaging ----------------------------------------------------------
   api.sendMessage = function sendMessage(msg, threadID, callback, replyToMessage, isGroup) {
     if (typeof callback !== "function") {
-      replyToMessage = callback;
+      if (typeof callback === "string" && replyToMessage === undefined) replyToMessage = callback;
       callback = null;
       if (typeof threadID === "function") {
         const cb = threadID;
