@@ -130,6 +130,17 @@
     "typ": false,
     "presence": false
   },
+  "customFeatures": {
+    "unsendOnReaction": {
+      "enable": true,
+      "reactions": ["😠", "😡"],
+      "notes": "when a bot admin (role 2) reacts with one of the reactions below on a message sent by the bot, the bot will unsend that message. Add or remove emojis in the reactions array to change which ones trigger the unsend."
+    },
+    "noPrefix": {
+      "enable": false,
+      "notes": "allow using commands without a prefix. Normal messages are never treated as commands: a message only runs a command when its first word exactly matches a command name or alias (for example \"help\" instead of \"~help\"). Set enable to true to turn it on."
+    }
+  },
   "optionsFca": {
     "forceLogin": true,
     "listenEvents": true,
