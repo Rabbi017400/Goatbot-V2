@@ -247,7 +247,13 @@ async function getThreadPictures(client, threadID, offset, limit) {
 }
 
 async function markAsRead(client, threadID, timestamp) {
-  const watermark = typeof timestamp === "boolean" ? Date.now() : timestamp || Date.now();
+  let watermark;
+  if (typeof timestamp === "number" && timestamp > 0) {
+    watermark = timestamp;
+  } else {
+    const meta = client.formatter ? client.formatter.getThreadMeta(threadID) : {};
+    watermark = (meta && (meta.lastActivityTimestamp || meta.lastMessageTimestamp)) || Date.now();
+  }
   await client.sendTasks([markReadTask(Number(threadID), watermark)]);
   return {};
 }
@@ -442,7 +448,16 @@ async function handleFriendRequest(client, userID, accept) {
 }
 
 async function handleMessageRequest(client, threadID, accept) {
-  if (accept) await client.sendTasks([acceptMessageRequestTask(Number(threadID))]);
+  if (typeof accept !== "boolean") throw { error: "Please pass a boolean as a second argument." };
+  if (accept) {
+    await client.sendTasks([acceptMessageRequestTask(Number(threadID))]);
+    return {};
+  }
+  const { httpPost } = require("./http");
+  const threadIDs = getType(threadID) === "Array" ? threadID : [threadID];
+  const form = { client: "mercury" };
+  threadIDs.forEach((value, index) => { form["other[" + index + "]"] = value; });
+  await httpPost(client, "https://www.facebook.com/ajax/mercury/move_thread.php", form);
   return {};
 }
 

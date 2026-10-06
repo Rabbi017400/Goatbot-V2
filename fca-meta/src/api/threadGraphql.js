@@ -50,7 +50,7 @@ function formatParticipantUser(node) {
     vanity: actor.username,
     url: actor.url,
     thumbSrc: image,
-    profileUrl: image,
+    profileUrl: actor.url || (actor.id ? `https://www.facebook.com/profile.php?id=${actor.id}` : null),
     gender: actor.gender,
     type: actor.__typename,
     isFriend: Boolean(actor.is_viewer_friend),

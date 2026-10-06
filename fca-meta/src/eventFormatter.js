@@ -445,7 +445,7 @@ class EventFormatter {
           firstName: contact.FirstName,
           vanity: contact.SecondaryName || contact.Username,
           thumbSrc: contact.ProfilePictureUrl || contact.ProfilePictureLargeUrl,
-          profileUrl: contact.ProfilePictureUrl || contact.ProfilePictureLargeUrl,
+          profileUrl: `https://www.facebook.com/profile.php?id=${id}`,
           gender: contact.Gender,
         });
       }

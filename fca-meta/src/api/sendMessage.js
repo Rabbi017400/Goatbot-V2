@@ -5,7 +5,7 @@ const { sendMessageTask, createGroupTask } = require("../tasks");
 const { uploadAttachment } = require("./upload");
 const { parsePublishResponse } = require("./decode");
 
-const ALLOWED_PROPERTIES = ["attachment", "url", "sticker", "emoji", "emojiSize", "body", "mentions", "location"];
+const ALLOWED_PROPERTIES = ["attachment", "url", "sticker", "emoji", "emojiSize", "body", "mentions", "location", "replyToMessage"];
 
 function buildMentions(msg) {
   if (!msg.mentions) return null;
@@ -33,9 +33,10 @@ function buildMentions(msg) {
 }
 
 async function sendMessage(client, msg, threadID, options = {}) {
-  const { replyToMessage } = options;
+  let { replyToMessage } = options;
   if (typeof msg === "string") msg = { body: msg };
   if (getType(msg) !== "Object") throw new Error("Message should be of type string or object and not " + getType(msg) + ".");
+  if (replyToMessage === undefined && msg.replyToMessage !== undefined) replyToMessage = msg.replyToMessage;
   if (getType(threadID) !== "Array" && getType(threadID) !== "Number" && getType(threadID) !== "String") {
     throw new Error("ThreadID should be of type number, string, or array and not " + getType(threadID) + ".");
   }

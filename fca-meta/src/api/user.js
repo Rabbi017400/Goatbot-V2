@@ -3,6 +3,9 @@
 const { getType } = require("../utils");
 const { getContactsFullTask, getContactsTask, searchUserTask } = require("../tasks");
 const { parsePublishResponse } = require("./decode");
+const { postGraphqlBatch } = require("./http");
+
+const USER_INFO_DOC_ID = "5009315269112105";
 
 function contactToUserInfo(contact) {
   if (!contact) return null;
@@ -32,17 +35,52 @@ function contactFromTable(table, id) {
 async function getUserInfo(client, ids) {
   const list = getType(ids) === "Array" ? ids : [ids];
   const result = {};
+  const missing = [];
   for (const id of list) {
+    let contact = null;
     try {
       const response = await client.sendTasks([getContactsFullTask(Number(id))]);
       const table = parsePublishResponse(response);
-      const contact = contactFromTable(table, id);
-      result[String(id)] = contactToUserInfo(contact) || defaultUser(id);
-    } catch (err) {
-      result[String(id)] = defaultUser(id);
-    }
+      contact = contactFromTable(table, id);
+    } catch (_) { /* fall back to graphql below */ }
+    if (contact) result[String(id)] = contactToUserInfo(contact);
+    else missing.push(id);
+  }
+  if (missing.length) {
+    const graph = await fetchUsersGraphql(client, missing).catch(() => ({}));
+    for (const id of missing) result[String(id)] = graph[String(id)] || defaultUser(id);
   }
   return result;
+}
+
+async function fetchUsersGraphql(client, ids) {
+  const endpoint = (client.getEndpoint ? client.getEndpoint("base_url") : "https://www.facebook.com") + "/api/graphqlbatch/";
+  const resData = await postGraphqlBatch(client, endpoint, {
+    queries: JSON.stringify({
+      o0: { doc_id: USER_INFO_DOC_ID, query_params: { ids: ids.map(String) } },
+    }),
+    batch_name: "MessengerParticipantsFetcher",
+  });
+  const out = {};
+  const actors = resData && resData[0] && resData[0].o0 && resData[0].o0.data && resData[0].o0.data.messaging_actors;
+  if (!Array.isArray(actors)) return out;
+  for (const actor of actors) {
+    if (!actor || actor.id === undefined) continue;
+    const image = actor.big_image_src ? actor.big_image_src.uri : "";
+    out[String(actor.id)] = {
+      name: actor.name || "",
+      firstName: actor.short_name || "",
+      vanity: actor.username || "",
+      thumbSrc: image,
+      profileUrl: actor.url || `https://www.facebook.com/profile.php?id=${actor.id}`,
+      gender: actor.gender || 0,
+      type: actor.__typename || "user",
+      isFriend: Boolean(actor.is_viewer_friend),
+      isBirthday: Boolean(actor.is_birthday),
+      userID: String(actor.id),
+    };
+  }
+  return out;
 }
 
 function defaultUser(id) {

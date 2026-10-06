@@ -115,12 +115,20 @@ function buildApi(client, globalOptions) {
     return promise;
   };
   api.editMessage = withCallback((text, messageID) => messageActions.editMessage(client, text, messageID));
-  api.setMessageReaction = function setMessageReaction(reaction, messageID, callback, forceCustomReaction) {
-    if (typeof callback !== "function" && forceCustomReaction === undefined) {
+  api.setMessageReaction = function setMessageReaction(reaction, messageID, threadID, callback, forceCustomReaction) {
+    if (typeof threadID === "function") {
+      forceCustomReaction = callback;
+      callback = threadID;
+      threadID = undefined;
+    } else if (typeof threadID === "boolean") {
+      forceCustomReaction = threadID;
+      threadID = undefined;
+    } else if (typeof callback === "boolean") {
       forceCustomReaction = callback;
       callback = null;
     }
-    const promise = messageActions.setMessageReaction(client, reaction, messageID, forceCustomReaction);
+    if (typeof callback !== "function") callback = null;
+    const promise = messageActions.setMessageReaction(client, reaction, messageID, threadID, forceCustomReaction);
     if (callback) promise.then((d) => callback(null, d), (e) => callback(e));
     return promise;
   };

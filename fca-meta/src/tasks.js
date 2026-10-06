@@ -141,19 +141,20 @@ function reactionTaskV2({ threadID, messageID, actorID, reaction, add }) {
   };
 }
 
-function reactionTask({ threadID, messageID, actorID, reaction, timestampMs }) {
+function reactionTask({ threadID, messageID, actorID, reaction, timestampMs, custom }) {
+  const payload = {
+    timestamp_ms: timestampMs || Date.now(),
+    message_id: messageID,
+    actor_id: actorID,
+    reaction,
+    reaction_style: custom ? 1 : null,
+    sync_group: 1,
+    send_attribution: 65537,
+  };
+  if (threadID !== undefined && threadID !== null && threadID !== "") payload.thread_key = threadID;
   return {
     label: TASK_LABELS.SendReactionTask,
-    payload: {
-      thread_key: threadID,
-      timestamp_ms: timestampMs || Date.now(),
-      message_id: messageID,
-      actor_id: actorID,
-      reaction,
-      reaction_style: null,
-      sync_group: 1,
-      send_attribution: 65537,
-    },
+    payload,
     queueName: JSON.stringify(["reaction", messageID]),
   };
 }

@@ -25,21 +25,25 @@ const VALID_REACTIONS = new Set([
   "",
 ]);
 
-async function setMessageReaction(client, reaction, messageID, forceCustomReaction) {
+async function setMessageReaction(client, reaction, messageID, threadID, forceCustomReaction) {
   if (client.iUserID) throw { error: "Cannot set reaction as another profile." };
   if (reaction !== undefined && reaction !== null && !forceCustomReaction) {
     if (REACTION_ALIASES[reaction] !== undefined) reaction = REACTION_ALIASES[reaction];
     else if (!VALID_REACTIONS.has(reaction)) throw { error: "Reaction is not a valid emoji." };
   }
   const emoji = reaction || "";
-  const threadID = client._getMessageThread ? client._getMessageThread(messageID) : (client._messageThreadMap && client._messageThreadMap.get(String(messageID))) || "";
+  let targetThread = threadID;
+  if (targetThread === undefined || targetThread === null || targetThread === "") {
+    targetThread = client._getMessageThread ? client._getMessageThread(messageID) : (client._messageThreadMap && client._messageThreadMap.get(String(messageID))) || "";
+  }
   const timestampMs = client._getMessageTimestamp ? client._getMessageTimestamp(messageID) : 0;
   await client.sendTasks([reactionTask({
-    threadID: Number(threadID || 0),
+    threadID: targetThread === undefined || targetThread === null || targetThread === "" ? undefined : Number(targetThread),
     messageID,
     actorID: Number(client.getCurrentUserID()),
     reaction: emoji,
     timestampMs,
+    custom: Boolean(forceCustomReaction),
   })]);
   return {};
 }
@@ -109,7 +113,9 @@ async function getMessage(client, threadID, messageID) {
   const { getMessageGraphql } = require("./messageGraphql");
   if (messageID === undefined || messageID === null) {
     messageID = threadID;
-    threadID = client._messageThreadMap ? client._messageThreadMap.get(String(messageID)) : null;
+    threadID = client._getMessageThread
+      ? client._getMessageThread(messageID)
+      : client._messageThreadMap && client._messageThreadMap.get(String(messageID));
   }
   if (!threadID || !messageID) return {};
   return getMessageGraphql(client, String(threadID), String(messageID));
