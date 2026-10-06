@@ -1,7 +1,7 @@
 module.exports = {
 	config: {
 		name: "listbox",
-		aliases: ["groups", "listgroup"],
+		aliases: ["grouplist", "listgroup"],
 		author: "Neoaz 🐊",
 		version: "1.0.0",
 		cooldowns: 5,
@@ -159,10 +159,10 @@ function getPageMessage(groups, page, limit, totalPages) {
 
 	message += `Page: ${page}/${totalPages}\n\n`;
 	message += `Reply with:\n`;
-	message += `• "next" - Next page\n`;
-	message += `• "back" - Previous page\n`;
-	message += `• "left [n]" - Leave group (eg. left 1)\n`;
-	message += `• "join [n]" - Add you to group (eg. join 1)`;
+	message += `• Type - next - Next page\n`;
+	message += `• Type - back - Previous page\n`;
+	message += `• Type - left [n] - Leave group (eg. left 1)\n`;
+	message += `• Type - join [n] - Add you to group (eg. join 1)`;
 
 	return message;
 };
