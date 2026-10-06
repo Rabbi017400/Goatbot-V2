@@ -7,7 +7,7 @@ module.exports = {
 		version: '1.14',
 		author: 'NTKhang',
 		countDown: 5,
-		role: 0,
+		role: 2,
 		description: {
 			vi: 'Thêm một phím tắt cho tin nhắn trong nhóm chat của bạn',
 			en: 'Add a shortcut for your message in group chat'

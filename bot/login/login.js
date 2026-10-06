@@ -933,6 +933,7 @@ async function startBot(loginWithEmail) {
 							// log.dev(cookieString);
 
 							let times = 5;
+							const reloginDeadline = Date.now() + 5 * 60 * 1000;
 
 							const spin = createOraDots(getText('login', 'retryCheckLiveCookie', times));
 							const countTimes = setInterval(() => {
@@ -953,6 +954,12 @@ async function startBot(loginWithEmail) {
 										const keyListen = Date.now();
 										isSendNotiErrorMessage = false;
 										global.GoatBot.Listening = api.listenMqtt(createCallBackListen(keyListen));
+									}
+									else if (Date.now() > reloginDeadline) {
+										clearInterval(interval);
+										clearInterval(countTimes);
+										intervalCheckLiveCookieAndRelogin = false;
+										log.err("NOT LOGGEG IN", getText('login', 'notLoggedIn'), error);
 									}
 								}, 5000);
 							}

@@ -27,11 +27,14 @@ function hasEssentialCookies(input) {
  */
 module.exports = async function (cookie, userAgent) {
 	const cookieString = toCookieString(cookie);
+	if (!hasEssentialCookies(cookie))
+		return false;
 	try {
 		const response = await axios({
-			url: 'https://mbasic.facebook.com/settings',
+			url: 'https://www.facebook.com/',
 			method: "GET",
 			timeout: 15000,
+			maxRedirects: 5,
 			headers: {
 				cookie: cookieString,
 				"user-agent": userAgent || 'Mozilla/5.0 (Linux; Android 12; M2102J20SG) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.0.0 Mobile Safari/537.36',
@@ -49,12 +52,14 @@ module.exports = async function (cookie, userAgent) {
 			}
 		});
 
-		const live = response.data.includes('/privacy/xcs/action/logging/') || response.data.includes('notifications.php?');
+		const data = String(response.data || "");
+		const live = data.includes('"__isLoggedIn":true') || data.includes('/privacy/xcs/action/logging/');
 		if (live)
 			return true;
-		// mbasic's markup changes often and it is being deprecated; when the
-		// essential session cookies are present, let the Lightspeed login decide
-		// instead of hard-blocking a possibly valid account.
+		// Facebook's markup changes often and a redirect to /login can also happen
+		// for anti-bot reasons. When the essential session cookies are present, let
+		// the Lightspeed login decide instead of hard-blocking a possibly valid
+		// account (avoids spurious re-logins / logouts).
 		return hasEssentialCookies(cookie);
 	}
 	catch (e) {

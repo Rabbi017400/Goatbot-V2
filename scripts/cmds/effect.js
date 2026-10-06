@@ -12,11 +12,10 @@ module.exports = {
 		category: "media",
 		guide: {
 			en: "   {pn} <effect name> [text]: send the effect"
-				+ "\n   {pn} <effect name> -c <count>: send the effect multiple times"
 				+ "\n   {pn} <effect name> -s <subject>: send the effect with a subject"
 				+ "\n   {pn} list: show the available effects"
 				+ "\n   Avatar effects use the avatar_ prefix, e.g. {pn} avatar_love"
-				+ "\n   Example: {pn} fire, {pn} celebration -c 3, {pn} avatar_cry"
+				+ "\n   Example: {pn} fire, {pn} celebration, {pn} avatar_cry"
 		}
 	},
 
@@ -46,16 +45,6 @@ module.exports = {
 			args.splice(subjectIndex, 2);
 		}
 
-		let count = 1;
-		const countIndex = args.findIndex(a => a === "-c" || a === "--v" || a === "-v");
-		if (countIndex !== -1) {
-			const parsed = parseInt(args[countIndex + 1]);
-			if (!isNaN(parsed) && parsed > 0)
-				count = Math.min(parsed, 20);
-			args = args.slice();
-			args.splice(countIndex, 2);
-		}
-
 		const name = (args.shift() || "").toLowerCase();
 		const avatar = avatars.find(a => name === `avatar_${a.name}` || name === `avatar_${a.effect.toLowerCase()}`);
 		const effect = effects.find(e => e.aliases.includes(name) || e.label.toLowerCase() === name);
@@ -68,12 +57,10 @@ module.exports = {
 		await message.reaction("⏳", event.messageID);
 
 		try {
-			for (let i = 0; i < count; i++) {
-				if (avatar)
-					await api.sendAvatarEffect(avatar.name, body, event.threadID);
-				else
-					await api.sendEffect(effect.aliases[0], body, event.threadID);
-			}
+			if (avatar)
+				await api.sendAvatarEffect(avatar.name, body, event.threadID);
+			else
+				await api.sendEffect(effect.aliases[0], body, event.threadID);
 			await message.reaction("✅", event.messageID);
 		}
 		catch (err) {
