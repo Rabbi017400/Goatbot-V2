@@ -2,6 +2,10 @@
 
 const { parseMessageIDTimestamp } = require("./utils");
 
+function normalizeReactionKey(emoji) {
+  return String(emoji == null ? "" : emoji).replace(/\uFE0F/g, "");
+}
+
 // Meta MessageRenderingType / admin message kinds. These are the values the
 // Messenger backend puts in the message_rendering_type column for system
 // ("admin") messages. They are mapped onto the fb-chat-api log:xxx event names.
@@ -206,7 +210,7 @@ class EventFormatter {
       });
     }
     for (const reaction of table.LSUpsertReaction || []) {
-      if (this._isDuplicateReaction(`${reaction.ThreadKey}|${reaction.MessageId}|${reaction.ActorId}|${reaction.Reaction}`)) continue;
+      if (this._isDuplicateReaction(`${reaction.ThreadKey}|${reaction.MessageId}|${reaction.ActorId}|${normalizeReactionKey(reaction.Reaction)}`)) continue;
       events.push({
         type: "message_reaction",
         threadID: String(reaction.ThreadKey),
@@ -231,14 +235,27 @@ class EventFormatter {
       });
     }
     for (const reaction of table.LSUpdateOrInsertReactionV2 || []) {
-      if (this._isDuplicateReaction(`${reaction.ThreadKey}|${reaction.MessageID}|v2|${reaction.ReactionLiteral}`)) continue;
+      if (!reaction.ViewerIsReactor) continue;
+      if (this._isDuplicateReaction(`${reaction.ThreadKey}|${reaction.MessageID}|${this.selfUserID}|${normalizeReactionKey(reaction.ReactionLiteral)}`)) continue;
       events.push({
         type: "message_reaction",
         threadID: String(reaction.ThreadKey),
         messageID: reaction.MessageID,
         reaction: reaction.ReactionLiteral,
-        senderID: reaction.ViewerIsReactor ? this.selfUserID : "",
-        userID: reaction.ViewerIsReactor ? this.selfUserID : "",
+        senderID: this.selfUserID,
+        userID: this.selfUserID,
+        timestamp: reaction.LastUpdatedTimestampMS || Date.now(),
+      });
+    }
+    for (const reaction of table.LSDeleteReactionV2 || []) {
+      if (this._isDuplicateReaction(`${reaction.ThreadKey}|${reaction.MessageID}|${this.selfUserID}|del`)) continue;
+      events.push({
+        type: "message_reaction",
+        threadID: String(reaction.ThreadKey),
+        messageID: reaction.MessageID,
+        reaction: "",
+        senderID: this.selfUserID,
+        userID: this.selfUserID,
         timestamp: reaction.LastUpdatedTimestampMS || Date.now(),
       });
     }

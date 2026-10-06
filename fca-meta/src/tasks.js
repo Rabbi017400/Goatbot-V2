@@ -51,7 +51,7 @@ class TaskManager {
     this.tasks.push({
       failure_count: null,
       label,
-      payload: JSON.stringify(payload),
+      payload: stringifyBigInt(payload),
       queue_name: queueName,
       task_id: this.client._getTaskID(),
     });
@@ -141,13 +141,13 @@ function reactionTaskV2({ threadID, messageID, actorID, reaction, add }) {
   };
 }
 
-function reactionTask({ threadID, messageID, actorID, reaction, timestampMs, custom }) {
+function reactionTask({ threadID, messageID, actorID, reaction, timestampMs }) {
   const payload = {
     timestamp_ms: timestampMs || Date.now(),
     message_id: messageID,
     actor_id: actorID,
     reaction,
-    reaction_style: custom ? 1 : null,
+    reaction_style: null,
     sync_group: 1,
     send_attribution: 65537,
   };

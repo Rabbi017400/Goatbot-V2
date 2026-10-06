@@ -1,7 +1,7 @@
 "use strict";
 
 const fs = require("fs");
-const { getType, streamToBuffer } = require("../utils");
+const { getType, streamToBuffer, toBigOrNumber } = require("../utils");
 const { uploadAttachment } = require("./upload");
 const {
   EFFECTS,
@@ -76,7 +76,7 @@ async function sendAvatarEffect(client, name, message, threadID) {
   const send = buildSendPayload(threadID, {
     text: payload.body,
     sendType: SEND_TYPE.MEDIA,
-    attachmentFBIds: [Number(fbid)],
+    attachmentFBIds: [toBigOrNumber(fbid)],
     powerUpStyle: resolveEffect(avatar.effect),
     replyToMessageID: payload.replyToMessageID,
   });

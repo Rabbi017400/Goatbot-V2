@@ -15,14 +15,14 @@ module.exports = {
 		guide: {
 			en: "   {pn} [on | off]: turn on/off selfListen"
 				+ "\n   {pn} status: show the current selfListen value"
-				+ "\n   selfListen is read when the bot connects to Facebook, so restart the bot after changing it"
+				+ "\n   selfListen is applied immediately, no restart needed"
 		}
 	},
 
 	langs: {
 		en: {
-			turnedOn: "✅ Turned on selfListen. Restart the bot for it to take effect.",
-			turnedOff: "✅ Turned off selfListen. Restart the bot for it to take effect.",
+			turnedOn: "✅ Turned on selfListen. It is now active.",
+			turnedOff: "✅ Turned off selfListen. It is now active.",
 			status: "📌 selfListen is currently %1",
 			on: "on",
 			off: "off"
@@ -43,6 +43,8 @@ module.exports = {
 		optionsFca.selfListen = value;
 		global.GoatBot.config.optionsFca.selfListen = value;
 		fs.writeFileSync(global.client.dirConfig, JSON.stringify(global.GoatBot.config, null, 2));
+		if (global.GoatBot.fcaApi && typeof global.GoatBot.fcaApi.setOptions === "function")
+			global.GoatBot.fcaApi.setOptions({ selfListen: value });
 		return message.reply(getLang(value ? "turnedOn" : "turnedOff"));
 	}
 };

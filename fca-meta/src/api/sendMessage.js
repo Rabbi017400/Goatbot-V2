@@ -1,6 +1,6 @@
 "use strict";
 
-const { getType, generateOfflineThreadingID, removeSpecialChar } = require("../utils");
+const { getType, generateOfflineThreadingID, removeSpecialChar, toBigOrNumber } = require("../utils");
 const { sendMessageTask, createGroupTask } = require("../tasks");
 const { uploadAttachment } = require("./upload");
 const { parsePublishResponse } = require("./decode");
@@ -62,12 +62,12 @@ async function sendMessage(client, msg, threadID, options = {}) {
     for (const attachment of list) {
       const metadata = await uploadAttachment(client, attachment, targetThread);
       const fbId = metadata.image_id || metadata.video_id || metadata.audio_id || metadata.gif_id || metadata.file_id;
-      if (fbId) attachmentFBIds.push(Number(fbId));
+      if (fbId) attachmentFBIds.push(toBigOrNumber(fbId));
     }
     sendType = 3;
   }
   if (msg.sticker) {
-    stickerId = Number(msg.sticker);
+    stickerId = toBigOrNumber(msg.sticker);
     sendType = 2;
   }
   if (msg.emoji) {
@@ -87,7 +87,7 @@ async function sendMessage(client, msg, threadID, options = {}) {
     await client.safety.simulateTyping(targetThread, body, isGroup);
   }
   const task = sendMessageTask(client, {
-    threadID: Number(targetThread),
+    threadID: toBigOrNumber(targetThread),
     otid: otid,
     text: body,
     replyToMessage,
@@ -121,11 +121,11 @@ async function sendMessage(client, msg, threadID, options = {}) {
 async function createThreadForUsers(client, userIDs) {
   const selfID = client.getCurrentUserID();
   const threadFBID = Date.now();
-  const participants = userIDs.map(Number).filter((id) => id && String(id) !== String(selfID));
+  const participants = userIDs.map(toBigOrNumber).filter((id) => id && String(id) !== String(selfID));
   const task = createGroupTask({
     threadID: threadFBID,
     otid: generateOfflineThreadingID(),
-    participants: [Number(selfID), ...participants],
+    participants: [toBigOrNumber(selfID), ...participants],
   });
   const response = await client.sendTasks([task]);
   const { resolveCreatedThreadID } = require("./thread");

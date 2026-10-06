@@ -128,7 +128,7 @@ function buildApi(client, globalOptions) {
       callback = null;
     }
     if (typeof callback !== "function") callback = null;
-    const promise = messageActions.setMessageReaction(client, reaction, messageID, threadID, forceCustomReaction);
+    const promise = messageActions.setMessageReaction(client, reaction, messageID, threadID);
     if (callback) promise.then((d) => callback(null, d), (e) => callback(e));
     return promise;
   };

@@ -1,6 +1,6 @@
 "use strict";
 
-const { getType, generateOfflineThreadingID } = require("../utils");
+const { getType, generateOfflineThreadingID, toBigOrNumber } = require("../utils");
 const { sendMessageTask } = require("../tasks");
 const { parsePublishResponse } = require("./decode");
 
@@ -38,7 +38,7 @@ async function bumpMessage(client, messageID, threadID) {
 
   const otid = generateOfflineThreadingID();
   const task = sendMessageTask(client, {
-    threadID: Number(targetThread),
+    threadID: toBigOrNumber(targetThread),
     otid,
     text: "",
     replyToMessage: id,

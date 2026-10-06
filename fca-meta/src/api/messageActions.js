@@ -1,6 +1,6 @@
 "use strict";
 
-const { getType, generateOfflineThreadingID } = require("../utils");
+const { getType, generateOfflineThreadingID, toBigOrNumber } = require("../utils");
 const {
   reactionTask,
   deleteMessageTask,
@@ -12,38 +12,31 @@ const {
 } = require("../tasks");
 const { parsePublishResponse } = require("./decode");
 
-const VALID_REACTIONS = new Set([
-  "\uD83D\uDE0D",
-  "\uD83D\uDE06",
-  "\uD83D\uDE2E",
-  "\uD83D\uDE22",
-  "\uD83D\uDE20",
-  "\uD83D\uDC4D",
-  "\uD83D\uDC4E",
-  "\u2764",
-  "\uD83D\uDC97",
-  "",
-]);
+const EMOJI_CHARS = /^[\p{Extended_Pictographic}\p{Emoji_Component}\u200D]+$/u;
+const EMOJI_GLYPH = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u20E3]/u;
 
-async function setMessageReaction(client, reaction, messageID, threadID, forceCustomReaction) {
+function isEmojiReaction(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 64) return false;
+  return EMOJI_CHARS.test(value) && EMOJI_GLYPH.test(value);
+}
+
+async function setMessageReaction(client, reaction, messageID, threadID) {
   if (client.iUserID) throw { error: "Cannot set reaction as another profile." };
-  if (reaction !== undefined && reaction !== null && !forceCustomReaction) {
-    if (REACTION_ALIASES[reaction] !== undefined) reaction = REACTION_ALIASES[reaction];
-    else if (!VALID_REACTIONS.has(reaction)) throw { error: "Reaction is not a valid emoji." };
-  }
-  const emoji = reaction || "";
+  if (reaction === undefined || reaction === null) reaction = "";
+  if (REACTION_ALIASES[reaction] !== undefined) reaction = REACTION_ALIASES[reaction];
+  if (reaction !== "" && !isEmojiReaction(reaction)) throw { error: "Reaction is not a valid emoji." };
+  const emoji = reaction;
   let targetThread = threadID;
   if (targetThread === undefined || targetThread === null || targetThread === "") {
     targetThread = client._getMessageThread ? client._getMessageThread(messageID) : (client._messageThreadMap && client._messageThreadMap.get(String(messageID))) || "";
   }
-  const timestampMs = client._getMessageTimestamp ? client._getMessageTimestamp(messageID) : 0;
+  const timestampMs = Date.now();
   await client.sendTasks([reactionTask({
-    threadID: targetThread === undefined || targetThread === null || targetThread === "" ? undefined : Number(targetThread),
+    threadID: targetThread === undefined || targetThread === null || targetThread === "" ? undefined : toBigOrNumber(targetThread),
     messageID,
-    actorID: Number(client.getCurrentUserID()),
+    actorID: toBigOrNumber(client.getCurrentUserID()),
     reaction: emoji,
     timestampMs,
-    custom: Boolean(forceCustomReaction),
   })]);
   return {};
 }
@@ -75,7 +68,7 @@ async function deleteMessage(client, messageOrMessages) {
   const list = getType(messageOrMessages) === "Array" ? messageOrMessages : [messageOrMessages];
   const map = client._messageThreadMap;
   await client.sendTasks(
-    list.map((id) => deleteMessageMeOnlyTask(map && map.has(String(id)) ? Number(map.get(String(id))) : 0, id))
+    list.map((id) => deleteMessageMeOnlyTask(map && map.has(String(id)) ? toBigOrNumber(map.get(String(id))) : 0, id))
   );
   return {};
 }
@@ -122,7 +115,7 @@ async function getMessage(client, threadID, messageID) {
 }
 
 async function createPoll(client, threadID, question, options) {
-  await client.sendTasks([createPollTask(Number(threadID), question, options)]);
+  await client.sendTasks([createPollTask(toBigOrNumber(threadID), question, options)]);
   return {};
 }
 

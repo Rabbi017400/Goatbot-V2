@@ -2,6 +2,7 @@
 
 const { DECODERS, DECODER_ALIASES } = require("./decoders");
 const { spToDepMap } = require("./sp");
+const { bigint: toInt64 } = require("./values");
 
 const STEP = {
   BLOCK: 1,
@@ -83,11 +84,11 @@ class LightSpeedDecoder {
       case STEP.UNDEFINED:
         return null;
       case STEP.I64_FROM_STRING: {
-        return toInt(stepData[0]);
+        return toInt64(stepData[0]);
       }
       case STEP.IF: {
-        const result = toInt(this.decode(stepData[0]));
-        if (result > 0) {
+        const result = toInt64(this.decode(stepData[0]));
+        if (result > 0 || result < 0) {
           this.decode(stepData[1]);
         } else if (stepData.length >= 3 && stepData[2] !== null && stepData[2] !== undefined) {
           this.decode(stepData[2]);
@@ -126,9 +127,9 @@ class LightSpeedDecoder {
       case STEP.LOGGER_LOG:
         return null;
       case STEP.I64_ADD:
-        return toInt(this.decode(stepData[0])) + toInt(this.decode(stepData[1]));
+        return toInt64(this.decode(stepData[0])) + toInt64(this.decode(stepData[1]));
       case STEP.I64_EQUAL:
-        return toInt(this.decode(stepData[0])) === toInt(this.decode(stepData[1]));
+        return toInt64(this.decode(stepData[0])) === toInt64(this.decode(stepData[1]));
       case STEP.TO_BLOB: {
         const b64 = stepData[0];
         if (typeof b64 !== "string") return null;

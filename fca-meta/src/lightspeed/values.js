@@ -12,6 +12,29 @@ function int(value) {
   return 0;
 }
 
+// int64 fields are mostly Facebook ids (threads, users, attachments). They can
+// exceed Number.MAX_SAFE_INTEGER, so keep the exact value as a BigInt and only
+// fall back to a plain number when the value is representable.
+function bigint(value) {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) ? value : BigInt(Math.trunc(value));
+  }
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!/^-?\d+$/.test(trimmed)) return 0;
+    try {
+      const parsed = BigInt(trimmed);
+      return parsed >= -9007199254740991n && parsed <= 9007199254740991n ? Number(parsed) : parsed;
+    } catch (_) {
+      return 0;
+    }
+  }
+  return 0;
+}
+
 function str(value) {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value;
@@ -32,4 +55,4 @@ function any(value) {
   return value;
 }
 
-module.exports = { int, str, bool, any };
+module.exports = { int, bigint, str, bool, any };

@@ -2,6 +2,7 @@
 
 const { EventEmitter } = require("events");
 const { HTTPClient, RedirectedError, parseJSON, stripAntiJS, errors, accountVerificationPath } = require("./http");
+const { parseLossless } = require("./bigjson");
 const { Cookies, cookiesFromAppState, appStateFromCookies } = require("./cookies");
 const { parseBootstrap, findVersionInJS } = require("./moduleParser");
 const { DgwSocket } = require("./socket/client");
@@ -477,7 +478,7 @@ class Client extends EventEmitter {
     }
     const ls = data.viewer && data.viewer.lightspeed_web_request;
     if (!ls) throw new Error("graphql request didn't return LS data");
-    const payload = JSON.parse(ls.payload);
+    const payload = parseLossless(ls.payload);
     const depMap = {};
     for (const dep of ls.dependencies || []) {
       if (dep && dep.name) depMap[dep.name] = dep.value && dep.value.__dr !== undefined ? dep.value.__dr : dep.value;
@@ -989,7 +990,7 @@ class Client extends EventEmitter {
   // --- Socket frame handling ---------------------------------------------
 
   _handleSocketFrame(frame) {
-    const prd = parseJSON(Buffer.from(frame));
+    const prd = parseLossless(frame.toString("utf8"));
     if (!prd) return;
     const waiter = this.syncWaiters.get(prd.request_id);
     if (waiter) {
@@ -1004,7 +1005,7 @@ class Client extends EventEmitter {
 
   _parsePublishResponse(prd) {
     if (!prd || !prd.payload) return {};
-    const lsData = parseJSON(Buffer.from(prd.payload));
+    const lsData = parseLossless(prd.payload.toString());
     if (!lsData) return {};
     const { LightSpeedDecoder } = require("./lightspeed");
     const { spToDepMap } = require("./lightspeed/sp");

@@ -2,7 +2,7 @@
 
 const { Bitmap } = require("./crypto/bitmap");
 const { LightSpeedDecoder } = require("./lightspeed");
-const { parseJSON } = require("./http");
+const { parseLossless } = require("./bigjson");
 const { generateWebSessionID } = require("./utils");
 
 function extractScripts(html) {
@@ -148,10 +148,10 @@ function parseBootstrap(html) {
     const content = (script.content || "").trim();
     if (!content) continue;
     if (script.id === "envjson") {
-      const d = parseJSON(Buffer.from(content));
+      const d = parseLossless(content);
       if (d && d.routing_namespace) configs.routingNamespace = d.routing_namespace;
     } else if (script.id === "__eqmc") {
-      const d = parseJSON(Buffer.from(content));
+      const d = parseLossless(content);
       if (d && d.u) {
         try {
           const u = new URL(d.u);

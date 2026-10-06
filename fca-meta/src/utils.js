@@ -159,6 +159,25 @@ function parseMessageIDTimestamp(messageID) {
   return ms + META_EPOCH_MS;
 }
 
+// Thread/contact IDs are int64 and routinely exceed Number.MAX_SAFE_INTEGER, so
+// they must reach the wire as their exact digits. Safe values stay plain numbers
+// to preserve the legacy fb-chat-api shape; only unrepresentable values become
+// BigInt, which stringifyBigInt emits verbatim.
+function toBigOrNumber(value) {
+  if (value === undefined || value === null || value === "") return value;
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && /^-?\d+$/.test(value)) {
+    try {
+      const parsed = BigInt(value);
+      return parsed >= -9007199254740991n && parsed <= 9007199254740991n ? Number(parsed) : parsed;
+    } catch (_) {
+      return value;
+    }
+  }
+  return value;
+}
+
 // JSON.stringify that keeps BigInt values as raw numbers (needed for epoch_id,
 // which exceeds Number.MAX_SAFE_INTEGER).
 function stringifyBigInt(obj) {
@@ -212,6 +231,7 @@ module.exports = {
   isReadableStream,
   removeSpecialChar,
   parseMessageIDTimestamp,
+  toBigOrNumber,
   stringifyBigInt,
   streamToBuffer,
 };

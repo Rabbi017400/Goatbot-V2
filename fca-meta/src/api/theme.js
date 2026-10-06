@@ -1,6 +1,7 @@
 "use strict";
 
 const { threadColorTask } = require("../tasks");
+const { toBigOrNumber } = require("../utils");
 
 const AI_THEME_QUERY = "useGenerateAIThemeMutation";
 
@@ -86,7 +87,7 @@ async function setThreadTheme(client, threadID, themeID) {
   if (themeID === undefined || themeID === null || themeID === "" || !/^\d+$/.test(String(themeID))) {
     throw new Error("setThreadTheme: themeID must be a numeric theme id");
   }
-  const response = await client.sendTasks([threadColorTask(Number(threadID), String(themeID))]);
+  const response = await client.sendTasks([threadColorTask(toBigOrNumber(threadID), String(themeID))]);
   return extractThemeResponse(response);
 }
 

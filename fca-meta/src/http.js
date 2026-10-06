@@ -8,6 +8,7 @@ const {
   buildClientHints,
 } = require("./useragent");
 const { delay } = require("./utils");
+const { parseLossless } = require("./bigjson");
 
 const ANTI_JS_PREFIX = Buffer.from("for (;;);");
 const MAX_RETRIES = 5;
@@ -249,7 +250,7 @@ class HTTPClient {
 function parseJSON(buffer) {
   if (!buffer || buffer.length === 0) return null;
   try {
-    return JSON.parse(buffer.toString("utf8"));
+    return parseLossless(buffer.toString("utf8"));
   } catch (_) {
     return null;
   }
@@ -265,7 +266,7 @@ function parseBatchJSON(buffer) {
   const parts = withoutForLoop.split(/\}\r\n *\{/);
   const jsonText = parts.length === 1 ? parts[0] : "[" + parts.join("},{") + "]";
   try {
-    return JSON.parse(jsonText);
+    return parseLossless(jsonText);
   } catch (_) {
     return null;
   }

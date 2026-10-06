@@ -1,6 +1,6 @@
 "use strict";
 
-const { getType } = require("../utils");
+const { getType, toBigOrNumber } = require("../utils");
 const {
   fetchThreadsTask,
   markReadTask,
@@ -201,7 +201,7 @@ async function getThreadInfo(client, formatter, threadID) {
     return result;
   }
   try {
-    const response = await client.sendTasks([fetchAdditionalThreadDataTask(Number(threadID))]);
+    const response = await client.sendTasks([fetchAdditionalThreadDataTask(toBigOrNumber(threadID))]);
     const table = parsePublishResponse(response);
     if (formatter) formatter.absorb(table);
     const threads = [...(table.LSDeleteThenInsertThread || []), ...(table.LSUpdateOrInsertThread || []), ...(table.LSVerifyThreadExists || [])];
@@ -213,7 +213,7 @@ async function getThreadInfo(client, formatter, threadID) {
   } catch (_) { /* fall through */ }
   const cached = formatter ? formatter.getThreadMeta(threadID) : {};
   return threadToInfo(client, {
-    ThreadKey: Number(threadID),
+    ThreadKey: toBigOrNumber(threadID),
     ThreadName: cached.name,
     ThreadPictureUrl: cached.imageSrc,
     Snippet: cached.snippet,
@@ -254,7 +254,7 @@ async function markAsRead(client, threadID, timestamp) {
     const meta = client.formatter ? client.formatter.getThreadMeta(threadID) : {};
     watermark = (meta && (meta.lastActivityTimestamp || meta.lastMessageTimestamp)) || Date.now();
   }
-  await client.sendTasks([markReadTask(Number(threadID), watermark)]);
+  await client.sendTasks([markReadTask(toBigOrNumber(threadID), watermark)]);
   return {};
 }
 
@@ -277,13 +277,13 @@ async function markAsSeen(client, seenTimestamp) {
 }
 
 async function sendTypingIndicator(client, threadID, isTyping, isGroup) {
-  await client.sendStatelessTask(typingTask(Number(threadID), isTyping, isGroup));
+  await client.sendStatelessTask(typingTask(toBigOrNumber(threadID), isTyping, isGroup));
   return {};
 }
 
 async function muteThread(client, threadID, muteSeconds) {
   const expire = muteSeconds === -1 ? -1 : Date.now() + muteSeconds * 1000;
-  await client.sendTasks([muteThreadTask(Number(threadID), expire)]);
+  await client.sendTasks([muteThreadTask(toBigOrNumber(threadID), expire)]);
   return {};
 }
 
@@ -299,13 +299,13 @@ async function changeArchivedStatus(client, threadIDs, archive) {
 
 async function setTitle(client, threadID, title) {
   noteAdminOp(client, threadID, "log:thread-name", { title });
-  await client.sendTasks([renameThreadTask(Number(threadID), title)]);
+  await client.sendTasks([renameThreadTask(toBigOrNumber(threadID), title)]);
   return {};
 }
 
 async function changeNickname(client, nickname, threadID, participantID) {
   noteAdminOp(client, threadID, "log:user-nickname", { participantID, nickname });
-  await client.sendTasks([nicknameTask(Number(threadID), Number(participantID), nickname)]);
+  await client.sendTasks([nicknameTask(toBigOrNumber(threadID), toBigOrNumber(participantID), nickname)]);
   return {};
 }
 
@@ -317,7 +317,7 @@ async function changeThreadColor(client, color, threadID) {
     throw { error: "Invalid color; pass a theme id or a known threadColors name." };
   }
   noteAdminOp(client, threadID, "log:thread-color", { themeId: String(themeId) });
-  await client.sendTasks([threadColorTask(Number(threadID), String(themeId))]);
+  await client.sendTasks([threadColorTask(toBigOrNumber(threadID), String(themeId))]);
   return {};
 }
 
@@ -325,7 +325,7 @@ async function changeThreadEmoji(client, emoji, threadID) {
   const { httpPost } = require("./http");
   noteAdminOp(client, threadID, "log:thread-icon", { emoji });
   try {
-    await client.sendTasks([threadEmojiTask(Number(threadID), emoji)]);
+    await client.sendTasks([threadEmojiTask(toBigOrNumber(threadID), emoji)]);
     return {};
   } catch (_) {
     const res = await httpPost(client, "https://www.facebook.com/messaging/save_thread_emoji/?source=thread_settings&__pc=EXP1%3Amessengerdotcom_pkg", {
@@ -345,7 +345,7 @@ async function changeGroupImage(client, image, threadID) {
   const imageID = metadata.image_id;
   if (imageID) {
     noteAdminOp(client, threadID, "log:thread-image", { imageID: String(imageID), url: metadata.src || metadata.uri || "" });
-    await client.sendTasks([setThreadImageTask(Number(threadID), Number(imageID))]);
+    await client.sendTasks([setThreadImageTask(toBigOrNumber(threadID), toBigOrNumber(imageID))]);
   }
   return {};
 }
@@ -354,30 +354,30 @@ async function changeAdminStatus(client, threadID, adminIDs, adminStatus) {
   const ids = getType(adminIDs) === "Array" ? adminIDs : [adminIDs];
   const isAdmin = adminStatus !== false;
   for (const id of ids) noteAdminOp(client, threadID, "log:thread-admins", { targetID: String(id), isAdmin });
-  const tasks = ids.map((id) => updateAdminTask(Number(threadID), Number(id), isAdmin));
+  const tasks = ids.map((id) => updateAdminTask(toBigOrNumber(threadID), toBigOrNumber(id), isAdmin));
   await client.sendTasks(tasks);
   return {};
 }
 
 async function addUserToGroup(client, userIDs, threadID) {
   const ids = getType(userIDs) === "Array" ? userIDs : [userIDs];
-  const numeric = ids.map(Number);
+  const numeric = ids.map(toBigOrNumber);
   noteAdminOp(client, threadID, "log:subscribe", {
     participantIDs: numeric.map(String),
     participantNames: numeric.map((id) => (client.formatter && client.formatter._nameOf ? client.formatter._nameOf(id) : "")),
   });
-  await client.sendTasks([addParticipantsTask(Number(threadID), numeric)]);
+  await client.sendTasks([addParticipantsTask(toBigOrNumber(threadID), numeric)]);
   return {};
 }
 
 async function removeUserFromGroup(client, userID, threadID) {
   noteAdminOp(client, threadID, "log:unsubscribe", { participantID: String(userID) });
-  await client.sendTasks([removeParticipantTask(Number(threadID), Number(userID))]);
+  await client.sendTasks([removeParticipantTask(toBigOrNumber(threadID), toBigOrNumber(userID))]);
   return {};
 }
 
 async function deleteThread(client, threadID) {
-  await client.sendTasks([deleteThreadTask(Number(threadID), 0)]);
+  await client.sendTasks([deleteThreadTask(toBigOrNumber(threadID), 0)]);
   return {};
 }
 
@@ -386,7 +386,7 @@ async function createNewGroup(client, participantIDs, groupTitle) {
   const { createGroupTask } = require("../tasks");
   const selfID = client.getCurrentUserID();
   const threadFBID = Date.now();
-  const participants = [Number(selfID), ...participantIDs.map(Number)];
+  const participants = [toBigOrNumber(selfID), ...participantIDs.map(toBigOrNumber)];
   const task = createGroupTask({ threadID: threadFBID, otid: generateOfflineThreadingID(), participants });
   const response = await client.sendTasks([task]);
   const realThreadID = resolveCreatedThreadID(response, threadFBID);
@@ -450,7 +450,7 @@ async function handleFriendRequest(client, userID, accept) {
 async function handleMessageRequest(client, threadID, accept) {
   if (typeof accept !== "boolean") throw { error: "Please pass a boolean as a second argument." };
   if (accept) {
-    await client.sendTasks([acceptMessageRequestTask(Number(threadID))]);
+    await client.sendTasks([acceptMessageRequestTask(toBigOrNumber(threadID))]);
     return {};
   }
   const { httpPost } = require("./http");

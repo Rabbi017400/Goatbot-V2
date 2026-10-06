@@ -1,6 +1,6 @@
 "use strict";
 
-const { delay } = require("./utils");
+const { delay, toBigOrNumber } = require("./utils");
 const { typingTask } = require("./tasks");
 
 const DEFAULT_SAFETY = {
@@ -172,10 +172,10 @@ class Safety {
     let duration = this.options.typingMinMs + length * this.options.typingMsPerChar;
     duration = Math.min(this.options.typingMaxMs, Math.max(this.options.typingMinMs, duration));
     try {
-      await this.client.sendStatelessTask(typingTask(Number(threadID), true, Boolean(isGroup)));
+      await this.client.sendStatelessTask(typingTask(toBigOrNumber(threadID), true, Boolean(isGroup)));
       this._stats.typing += 1;
       await delay(duration);
-      await this.client.sendStatelessTask(typingTask(Number(threadID), false, Boolean(isGroup)));
+      await this.client.sendStatelessTask(typingTask(toBigOrNumber(threadID), false, Boolean(isGroup)));
     } catch (_) {
       /* typing is best-effort and must never break a send */
     }

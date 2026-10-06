@@ -1,6 +1,6 @@
 "use strict";
 
-const { getType } = require("../utils");
+const { getType, toBigOrNumber } = require("../utils");
 const { getContactsFullTask, getContactsTask, searchUserTask } = require("../tasks");
 const { parsePublishResponse } = require("./decode");
 const { postGraphqlBatch } = require("./http");
@@ -39,7 +39,7 @@ async function getUserInfo(client, ids) {
   for (const id of list) {
     let contact = null;
     try {
-      const response = await client.sendTasks([getContactsFullTask(Number(id))]);
+      const response = await client.sendTasks([getContactsFullTask(toBigOrNumber(id))]);
       const table = parsePublishResponse(response);
       contact = contactFromTable(table, id);
     } catch (_) { /* fall back to graphql below */ }
@@ -128,7 +128,7 @@ async function getUserID(client, username) {
   const results = [];
   for (const item of table.LSInsertSearchResult || []) {
     if (item.Type_ === 1 || item.Type_ === 2) {
-      const fbid = item.OtherUserId || (item.ThreadType && item.ThreadType < 100 ? Number(item.ResultId) : 0);
+      const fbid = item.OtherUserId || (item.ThreadType && item.ThreadType < 100 ? toBigOrNumber(item.ResultId) : 0);
       if (fbid) results.push({ userID: String(fbid), name: item.DisplayName, photoUrl: item.ProfilePicUrl, type: "user" });
     }
   }
