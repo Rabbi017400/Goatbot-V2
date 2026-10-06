@@ -10,7 +10,7 @@ const { decodeLSData } = require("./lightspeed");
 const { TaskManager } = require("./tasks");
 const { FacebookEndpoints, MessengerEndpoints } = require("./endpoints");
 const { USER_AGENT, ASBD_ID } = require("./useragent");
-const { generateSessionID } = require("./utils");
+const { generateSessionID, stringifyBigInt } = require("./utils");
 const { Safety, DEFAULT_SAFETY } = require("./safety");
 const { SessionStore, cookieKeyFromCookies } = require("./sessionStore");
 const { getDoc } = require("./graphql");
@@ -788,10 +788,10 @@ class Client extends EventEmitter {
   async sendStatelessTask(task) {
     const payload = {
       label: task.label,
-      payload: JSON.stringify(task.payload),
+      payload: stringifyBigInt(task.payload),
       version: String(this.configs.versionID),
     };
-    return this._makeLSRequestViaSocket(JSON.stringify(payload), 4);
+    return this._makeLSRequestViaSocket(stringifyBigInt(payload), 4);
   }
 
   _getTaskID() {

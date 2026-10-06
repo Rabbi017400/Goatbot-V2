@@ -534,6 +534,47 @@ assert.strictEqual(typeof editMessage, "function");
   assert.strictEqual(removalEvents[0].type, "message_reaction");
   assert.strictEqual(removalEvents[0].reaction, "", "a V2 deletion clears the reaction");
 
+  const { stringifyBigInt } = require("../src/utils");
+  const { typingTask } = require("../src/tasks");
+  const bigTyping = typingTask(12345678901234567n, true, true);
+  assert.strictEqual(
+    stringifyBigInt(bigTyping.payload),
+    '{"thread_key":12345678901234567,"is_group_thread":1,"is_typing":1,"attribution":0,"sync_group":1,"thread_type":2}',
+    "typing payloads with int64 thread ids must serialize instead of throwing"
+  );
+  assert.throws(() => JSON.stringify(bigTyping.payload), /BigInt/, "plain JSON.stringify is the failure this guards against");
+
+  const replyFormatter = new EventFormatter(fakeClient, { selfListen: true });
+  replyFormatter.updateThreadMeta(100, { threadID: "100", isGroup: true, participantIDs: ["1", "2"] });
+  const replyInline = replyFormatter.processTable({
+    LSInsertMessage: [{
+      MessageId: "r1", ThreadKey: 100, SenderId: "111", TimestampMs: 1, Text: "nice",
+      ReplySourceId: "mid.$photo", ReplyToUserId: "222", ReplyMessageText: "look",
+      ReplyAttachmentType: 2, ReplyAttachmentId: 777, ReplyMediaUrl: "https://cdn/photo.jpg",
+      ReplyMediaUrlMimeType: "image/jpeg", ReplyMediaPreviewWidth: 640, ReplyMediaPreviewHeight: 480,
+    }],
+  });
+  const replyEvent = replyInline.find((e) => e.type === "message_reply");
+  assert.ok(replyEvent, "a reply must produce a message_reply event");
+  assert.strictEqual(replyEvent.messageReply.attachments.length, 1, "reply photo must surface in messageReply.attachments");
+  assert.strictEqual(replyEvent.messageReply.attachments[0].type, "photo");
+  assert.strictEqual(replyEvent.messageReply.attachments[0].url, "https://cdn/photo.jpg");
+  assert.strictEqual(replyEvent.messageReply.attachments[0].ID, 777);
+  assert.strictEqual(replyEvent.messageReply.senderID, "222");
+  assert.strictEqual(replyEvent.messageReply.messageID, "mid.$photo");
+
+  const replyCached = replyFormatter.processTable({
+    LSInsertAttachment: [{ MessageId: "mid.$photo", AttachmentFbid: 777, AttachmentType: 2, PlayableUrl: "https://cdn/full.jpg", PreviewUrl: "https://cdn/thumb.jpg" }],
+    LSInsertMessage: [{ MessageId: "r2", ThreadKey: 100, SenderId: "111", TimestampMs: 2, Text: "again", ReplySourceId: "mid.$photo", ReplyToUserId: "222", ReplyMessageText: "look", ReplyAttachmentType: 2, ReplyMediaUrl: "https://cdn/reply.jpg" }],
+  });
+  const cachedReply = replyCached.find((e) => e.type === "message_reply");
+  assert.strictEqual(cachedReply.messageReply.attachments[0].url, "https://cdn/full.jpg", "cached original attachments must be preferred over the reply preview");
+
+  const replyNone = replyFormatter.processTable({
+    LSInsertMessage: [{ MessageId: "r3", ThreadKey: 100, SenderId: "111", TimestampMs: 3, Text: "text only", ReplySourceId: "mid.$text", ReplyToUserId: "222", ReplyMessageText: "hi" }],
+  });
+  assert.deepStrictEqual(replyNone.find((e) => e.type === "message_reply").messageReply.attachments, [], "a text-only reply has no attachments");
+
   const { sendMessage: sendMessageFn } = require("../src/api/sendMessage");
   const sendCalls = [];
   const smClient = {

@@ -401,6 +401,37 @@ class EventFormatter {
     };
   }
 
+  _replyAttachments(msg) {
+    const cached = this.messageAttachments.get(String(msg.ReplySourceId));
+    if (cached && cached.length) return cached.slice();
+    const type = Number(msg.ReplyAttachmentType || 0);
+    const url = msg.ReplyMediaUrl || msg.ReplyMediaUrlFallback || "";
+    const previewUrl = msg.ReplyMediaUrlFallback || msg.ReplyMediaUrl || "";
+    if (type === 1) {
+      return [{
+        type: "sticker",
+        ID: msg.ReplyAttachmentId,
+        url,
+        previewUrl,
+        stickerID: msg.ReplyAttachmentId,
+        packID: null,
+      }];
+    }
+    if (!type && !url) return [];
+    const kind = this._attachmentType({ AttachmentType: type, AttachmentMimeType: msg.ReplyMediaUrlMimeType }, "");
+    const attachment = {
+      type: kind,
+      ID: msg.ReplyAttachmentId,
+      url,
+      previewUrl,
+      width: msg.ReplyMediaPreviewWidth,
+      height: msg.ReplyMediaPreviewHeight,
+    };
+    if (kind === "audio" || kind === "video") attachment.duration = msg.ReplyMediaUnknownTimestampS;
+    if (kind === "share") attachment.title = msg.ReplySnippet;
+    return [attachment];
+  }
+
   _absorbThreads(table) {
     const lists = [
       table.LSDeleteThenInsertThread,
@@ -531,7 +562,7 @@ class EventFormatter {
         threadID,
         messageID: msg.ReplySourceId,
         isGroup,
-        attachments: [],
+        attachments: this._replyAttachments(msg),
         mentions: {},
         timestamp: msg.ReplySourceTimestampMs || 0,
       };
