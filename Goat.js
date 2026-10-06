@@ -146,6 +146,9 @@ const utils = require("./utils.js");
 global.utils = utils;
 const { colors } = utils;
 
+require("./bot/healthServer.js").startHealthServer(config, log);
+
+
 global.temp = {
 	createThreadData: [],
 	createUserData: [],
