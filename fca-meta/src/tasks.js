@@ -393,7 +393,7 @@ function getContactsFullTask(contactID) {
 function acceptMessageRequestTask(threadID) {
   return {
     label: TASK_LABELS.AcceptMessageRequestTask,
-    payload: { thread_key: threadID, sync_group: 1, ig_folder: null },
+    payload: { thread_key: threadID, sync_group: 95, ig_folder: null },
     queueName: "message_request",
   };
 }
