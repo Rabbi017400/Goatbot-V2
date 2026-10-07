@@ -424,6 +424,28 @@ without a new server API.
 - `Client.sendStatelessTask` serializes with `stringifyBigInt`, not `JSON.stringify`. Typing/presence tasks carry `thread_key`; for int64 thread ids beyond `Number.MAX_SAFE_INTEGER` the value is a `BigInt` and raw `JSON.stringify` throws `Do not know how to serialize a BigInt`. `simulateTyping` swallows errors, so the symptom was a missing typing indicator on exactly the large-ID threads the bot had just started working in. `sendTasks` was already safe via `TaskManager.finalizePayload` (`stringifyBigInt`).
 - `event.messageReply.attachments` is populated, not hardcoded `[]`. It prefers the cached attachments of `ReplySourceId` (full `PlayableUrl`/`PreviewUrl` from `LSInsertAttachment`), else synthesizes one attachment from the inline reply media fields (`ReplyAttachmentType`, `ReplyAttachmentId`, `ReplyMediaUrl`, `ReplyMediaUrlMimeType`, `ReplyMediaPreviewWidth/Height`), and returns `[]` for a text-only reply. `_attachmentType` is reused so a reply sticker maps to `sticker` with `stickerID`.
 
+## Replayed history on (re)connect (bot re-runs an old command after restart)
+
+On every socket (re)connect the Lightspeed sync re-sends the recent history of
+databases 1/2/95/104 as ordinary tables. fca-meta delivers those rows through
+the same path as live rows, so a message the bot already answered before the
+restart is seen again and its command re-executes (e.g. the bot re-sends a song
+after a restart). It is not a send/duplicate bug: the same `MessageId` is
+delivered as a *new* event.
+
+`listenMqtt` gates this in `src/listen.js`: until the sync completes (`ready`)
+it drops `message`/`message_reply` **and `event`** (admin/log) rows whose
+`timestamp` is more than `replayClockSkewMs` (default 10s) older than the moment
+listening started. Gating `event` matters too: a replayed `log:subscribe` /
+`log:unsubscribe` otherwise re-triggers the bot's welcome/goodbye handlers. A
+`replayGraceMs` timeout (default 20s) opens the gate if `ready` never arrives.
+The skew window lets a message the user sends during the sync still get through,
+and the gate does not apply to reactions/presence/typing. `api.listenMqtt`
+forwards `options.replayGraceMs` / `options.replayClockSkewMs`. This also covers
+the in-process hourly `restartListenMqtt`, which calls `stopListening` +
+`listenMqtt` and previously replayed the last ~hour of messages on each cycle.
+
+
 ## Message-request accept (pending command)
 
 `api.handleMessageRequest(threadID, true)` must send the `AcceptMessageRequestTask`

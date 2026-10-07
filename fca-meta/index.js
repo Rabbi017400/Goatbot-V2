@@ -338,6 +338,7 @@ function buildApi(client, globalOptions) {
     const handle = listenMqtt(client, formatter, callback, {
       emitReady: globalOptions.emitReady === true,
       refreshIntervalMs: globalOptions.refreshFb_dtsgIntervalMs,
+      replayGraceMs: globalOptions.replayGraceMs,
     });
     api.stopListening = (cb) => handle.stopListening(cb);
     api.stopListeningAsync = () => handle.stopListeningAsync();

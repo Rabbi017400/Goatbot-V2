@@ -265,8 +265,8 @@ liveClient._messageThreadMap = new Map();
 const liveFormatter = new EventFormatter(liveClient, { selfListen: true });
 const dispatched = [];
 const liveHandle = listenMqtt(liveClient, liveFormatter, (err, ev) => dispatched.push([err, ev]), { emitReady: true });
-liveClient.emit("ls-table", { LSInsertMessage: [{ MessageId: "m1", ThreadKey: 700, SenderId: UID2, TimestampMs: 5, Text: "hello" }] });
-liveClient.emit("ls-table", { LSInsertMessage: [{ MessageId: "m2", ThreadKey: 700, SenderId: UID2, TimestampMs: 6, Text: "reply", ReplySourceId: "m1", ReplyToUserId: UID1, ReplyMessageText: "hello" }] });
+liveClient.emit("ls-table", { LSInsertMessage: [{ MessageId: "m1", ThreadKey: 700, SenderId: UID2, TimestampMs: Date.now(), Text: "hello" }] });
+liveClient.emit("ls-table", { LSInsertMessage: [{ MessageId: "m2", ThreadKey: 700, SenderId: UID2, TimestampMs: Date.now() + 1, Text: "reply", ReplySourceId: "m1", ReplyToUserId: UID1, ReplyMessageText: "hello" }] });
 assert.strictEqual(dispatched[0][1].type, "message");
 assert.strictEqual(dispatched[1][1].type, "message_reply");
 assert.strictEqual(dispatched[1][1].messageReply.messageID, "m1");
@@ -600,6 +600,32 @@ assert.strictEqual(typeof editMessage, "function");
   await threadApi.handleMessageRequest(declineClient, 42, false);
   assert.ok(declineCalls[0].url.includes("move_thread.php"), "decline must move the thread out of the request inbox");
   assert.ok(declineCalls[0].opts.body.includes("other%5B0%5D=42"), "decline must target the other folder");
+
+  const { EventEmitter } = require("events");
+  const { listenMqtt } = require("../src/listen");
+  const listenClient = new EventEmitter();
+  listenClient.connect = async () => { };
+  listenClient.reset = async () => { };
+  listenClient._messageThreadMap = new Map();
+  const delivered = [];
+  const fakeFmt = {
+    processTable: (table) => table.events || [],
+    absorb: () => { },
+  };
+  const handle = listenMqtt(listenClient, fakeFmt, (err, event) => { if (!err) delivered.push(event); }, { replayGraceMs: 60000 });
+  const oldTs = Date.now() - 120000;
+  listenClient.emit("ls-table", { events: [
+    { type: "message", messageID: "old-cmd", threadID: "1", timestamp: oldTs, body: "sing hello" },
+    { type: "message", messageID: "live-1", threadID: "1", timestamp: Date.now(), body: "hi" },
+    { type: "message_reaction", messageID: "m1", threadID: "1", timestamp: oldTs, reaction: "\u2764" },
+    { type: "event", messageID: "old-join", threadID: "1", timestamp: oldTs, logMessageType: "log:subscribe" },
+  ] });
+  assert.deepStrictEqual(delivered.map((e) => `${e.type}:${e.messageID || ""}`), ["message:live-1", "message_reaction:m1"], "replayed history must be dropped before ready");
+  listenClient.emit("ready", { reconnect: true });
+  listenClient.emit("ls-table", { events: [{ type: "message", messageID: "live-2", threadID: "1", timestamp: Date.now() - 5000, body: "after ready" }] });
+  assert.ok(delivered.some((e) => e.messageID === "live-2"), "messages delivered after ready must not be gated");
+  handle.stopListening();
+  assert.strictEqual(listenClient.listenerCount("ls-table"), 0, "stopListening must detach listeners");
 
   console.log("smoke: all assertions passed");
 })();

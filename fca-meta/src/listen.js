@@ -33,6 +33,40 @@ function listenMqtt(client, formatter, callback, options) {
   };
   if (typeof callback === "function") globalCallback = callback;
 
+  // On every (re)connect the Lightspeed sync replays the recent history of the
+  // databases as ordinary tables. Those rows are delivered through the same
+  // path as live rows, so a command the bot already answered before the restart
+  // is seen again and re-executed, and a replayed log:subscribe/log:unsubscribe
+  // re-triggers welcome/goodbye handlers. Until the sync finishes ("ready") only
+  // clearly old message and admin events are dropped, so a message the user
+  // sends right after the restart still gets through. The timeout is a fallback
+  // in case "ready" never arrives; clock skew keeps a live event from being
+  // misjudged.
+  const listenStartedAt = Date.now();
+  const replayGraceMs = options.replayGraceMs === undefined ? 20000 : Number(options.replayGraceMs);
+  const replayClockSkewMs = options.replayClockSkewMs === undefined ? 10000 : Number(options.replayClockSkewMs);
+  let replayGateOpen = false;
+  const openReplayGate = () => {
+    if (replayGateOpen) return;
+    replayGateOpen = true;
+    clearTimeout(replayGateTimer);
+  };
+  const replayGateTimer = setTimeout(openReplayGate, replayGraceMs);
+  if (replayGateTimer.unref) replayGateTimer.unref();
+
+  const isReplay = (event) => {
+    if (replayGateOpen) return false;
+    if (!event) return false;
+    const gated = event.type === "message" || event.type === "message_reply" || event.type === "event";
+    if (!gated) return false;
+    const ts = Number(event.timestamp);
+    return Number.isFinite(ts) && ts > 0 && ts < listenStartedAt - replayClockSkewMs;
+  };
+  const deliver = (event) => {
+    if (isReplay(event)) return;
+    globalCallback(null, event);
+  };
+
   const onTable = (table) => {
     if (stopped) return;
     const events = formatter.processTable(table);
@@ -41,10 +75,11 @@ function listenMqtt(client, formatter, callback, options) {
         if (client._trackMessageThread) client._trackMessageThread(event.messageID, event.threadID, event.timestamp);
         else client._messageThreadMap.set(String(event.messageID), event.threadID);
       }
-      globalCallback(null, event);
+      deliver(event);
     }
   };
   const onReady = () => {
+    openReplayGate();
     if (stopped || !options.emitReady) return;
     globalCallback(null, { type: "ready", error: null });
   };
