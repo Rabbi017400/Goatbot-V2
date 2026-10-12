@@ -73,9 +73,13 @@ module.exports = {
 
 		await message.reaction("⏳", event.messageID);
 
+		// searchMusic ranks category containers ("MediaTag") alongside real tracks,
+		// so the top row is sometimes not playable. Pull a candidate pool and
+		// filter to playable tracks before applying the count.
+		const poolSize = count > 0 ? Math.max(count * 3, 30) : 30;
 		let results;
 		try {
-			results = await api.searchMusic(query, { limit: Math.max(count, 1), exact: false });
+			results = await api.searchMusic(query, { limit: poolSize, first: Math.max(poolSize, 30), exact: false });
 		}
 		catch (err) {
 			await message.reaction("❌", event.messageID);
