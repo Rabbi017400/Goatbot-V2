@@ -52,8 +52,8 @@ Regenerate both together; do not hand-edit generated output.
 - `tools/live-test.js` is the end-to-end self-test: one login against
   `.tmp-account.json`, then identity, `getSessionID`, `getCookies`/`getAppState`,
   effects, `listenMqtt` (real DGW event stream), thread list/info/history,
-  send/edit/react/poll/typing/markAsRead/getUserInfo, cleanup, and
-  logout+persist. Run `node tools/live-test.js`. It is safe/isolated: no
+  send/edit/react/poll/typing/markAsRead/getUserInfo, cleanup, and logout.
+  Run `node tools/live-test.js`. It is safe/isolated: no
   comments, minimal sends, and it cleans up after itself.
 - `sendMessage` before `listenMqtt` works: `Client.sendTasks` lazily starts
   the socket via `_ensureConnectStarted()`. Do not remove that call.
