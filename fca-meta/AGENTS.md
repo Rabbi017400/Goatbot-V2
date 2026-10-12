@@ -234,36 +234,23 @@ therefore force-reconnects on a timer and this client mirrors that:
   reconnects itself. The timer is `unref()`d, so it never keeps the process
   alive on its own.
 
-## Session persistence (`src/sessionStore.js`)
+## Session persistence (removed)
 
-Facebook logs a bot out when the session identity it sees changes between runs:
-a different device id, a rotated cookie replayed stale, or a mismatched browser
-fingerprint. The client now removes those vectors by default, without changing
-the public `fb-chat-api` surface.
+fca-meta does **not** back up or reuse cookies from disk. Each login uses exactly
+the appState it was given (`account.txt`), so a redeploy always starts from the
+current committed session. There is no `sessionStore`, no `options.store`, and no
+`api.persistSession()` / `api.getDeviceID()`.
 
-- **Device id is stable.** The bootstrap `MqttWebDeviceID.clientID` is *not*
-  stable: Facebook mints a new one on each page load. So the persisted device id
-  takes precedence over the bootstrap value, and only generates a fresh id when
-  neither exists. Verified live: two consecutive logins now reuse the same id,
-  and the DGW socket still connects. (`api.getDeviceID()` returns it.)
-- **Cookie rotations persist.** `Cookies.updateFromResponse` now returns each
-  rotated cookie together with its previous value; `Client._onCookieRotation`
-  records `{previous, value, at}` per name and writes the jar to disk (debounced,
-  atomic temp+rename, `0600`). On the next login the persisted jar is merged so a
-  server rotation is replayed over the stale appState value, while a genuinely
-  re-exported appState still wins (the merge only applies the persisted value
-  when the incoming value equals the recorded `previous`).
-- **Fingerprint is consistent.** `sec-ch-ua` client hints are derived from the
-  active `userAgent` (`parseUserAgent`/`buildClientHints`) instead of being fixed.
-  Overriding `options.userAgent` updates both the header and the hints together,
-  so the UA and its CH headers never disagree.
-- State lives in `~/.fca-meta/<key>.json` (key = `u<c_user>`), overridable with
-  `options.store` (`{ dir, key, file }`, or `false` to disable). `api.logout()`
-  clears it; `api.persistSession()` and `api.getDeviceID()` expose it manually.
+- Cookie rotations from `Set-Cookie` are still applied to the in-memory jar
+  (`Cookies.updateFromResponse`, standard cookie-jar behaviour), but they are
+  never recorded or replayed on a later login. `Client._onCookieRotation` and
+  `src/sessionStore.js` are gone, along with `options.store`.
+- The bootstrap `MqttWebDeviceID.clientID` is used as-is (a fresh one only when
+  absent); there is no persisted device id to override it.
+- `api.logout()` just disconnects now that there is nothing to clear.
 
-`options.store` is additive; omitting it keeps the default persistence. Use a
-stable residential/mobile proxy per account too — a datacenter IP alone can still
-get a fresh session flagged.
+Use a stable residential/mobile proxy per account — a datacenter IP alone can
+still get a fresh session flagged.
 
 ## Effects (text power-ups and avatar effects)
 

@@ -81,7 +81,6 @@ function buildApi(client, globalOptions) {
     if (options.userAgent) {
       client.userAgent = options.userAgent;
       client.http.setUserAgent(options.userAgent);
-      client.persistSession(false);
     }
     formatter.selfListen = globalOptions.selfListen !== false;
     formatter.selfListenEvent = Boolean(globalOptions.selfListenEvent);
@@ -335,11 +334,8 @@ function buildApi(client, globalOptions) {
   });
   api.logout = withCallback(async () => {
     client.disconnect();
-    if (client.sessionStore) client.sessionStore.clear();
     return true;
   });
-  api.persistSession = () => client.persistSession(true);
-  api.getDeviceID = () => (client.configs && client.configs.mqttWebDeviceID) || client._persistedDeviceID || "";
 
   // --- Listening ----------------------------------------------------------
   api.listenMqtt = (callback) => {
@@ -400,7 +396,6 @@ async function login(credentials, options, callback) {
       userAgent: options.userAgent,
       proxy: options.proxy,
       host: options.host,
-      store: options.store,
       autoReconnect: options.autoReconnect,
       forceRefreshIntervalMs: options.forceRefreshIntervalMs,
       minFullReconnectMs: options.minFullReconnectMs,

@@ -11,7 +11,6 @@ const { TaskManager } = require("./tasks");
 const { FacebookEndpoints, MessengerEndpoints } = require("./endpoints");
 const { USER_AGENT, ASBD_ID } = require("./useragent");
 const { generateSessionID, stringifyBigInt } = require("./utils");
-const { SessionStore, cookieKeyFromCookies } = require("./sessionStore");
 const { getDoc } = require("./graphql");
 
 const BASE_SYNC_DATABASES = [1, 2, 95, 104];
@@ -68,89 +67,6 @@ class Client extends EventEmitter {
     this._lastFullReconnect = 0;
     this._periodicReconnectTimer = null;
     this.permanentErrored = false;
-    this.sessionStore = this._buildSessionStore(options);
-    this._persistTimer = null;
-    this._seedValues = this.cookies.getAll();
-    this.http.onCookieRotation = (rotations) => this._onCookieRotation(rotations);
-    this.loadPersistedSession();
-  }
-
-  _buildSessionStore(options) {
-    if (options.store instanceof SessionStore) return options.store;
-    const storeConfig = options.store === false ? { enabled: false } : options.store || {};
-    const key = storeConfig.key || cookieKeyFromCookies(this.cookies);
-    return new SessionStore(Object.assign({}, storeConfig, { key }));
-  }
-
-  loadPersistedSession() {
-    if (!this.sessionStore) return null;
-    const data = this.sessionStore.load();
-    if (!data) return null;
-    const persisted = data.cookies && data.cookies.length ? cookiesFromAppState(data.cookies) : null;
-    this._seedValues = this.cookies.getAll();
-    if (persisted) {
-      const rotations = data.rotations && typeof data.rotations === "object" ? data.rotations : {};
-      const merged = this.cookies.getAll();
-      for (const key of Object.keys(persisted.values)) {
-        const hasFresh = merged[key] !== undefined;
-        if (!hasFresh) {
-          merged[key] = persisted.values[key];
-          continue;
-        }
-        const rotation = rotations[key];
-        if (rotation && merged[key] === rotation.previous) {
-          merged[key] = persisted.values[key];
-        }
-      }
-      this.cookies.updateValues(merged);
-      this.iUserID = this.cookies.get("i_user") || this.iUserID;
-    }
-    if (data.userAgent && !this.options.userAgent) {
-      this.userAgent = data.userAgent;
-      this.http.setUserAgent(data.userAgent);
-    }
-    this._persistedDeviceID = data.deviceID || "";
-    return data;
-  }
-
-  persistSession(force) {
-    if (!this.sessionStore || !this.sessionStore.enabled) return false;
-    if (force) {
-      if (this._persistTimer) {
-        clearTimeout(this._persistTimer);
-        this._persistTimer = null;
-      }
-      return this.sessionStore.save({
-        userID: this.cookies.get("c_user") || this.getCurrentUserID(),
-        deviceID: (this.configs && this.configs.mqttWebDeviceID) || this._persistedDeviceID || "",
-        userAgent: this.userAgent,
-        cookies: this.cookies,
-        rotations: this._persistedRotations || {},
-      });
-    }
-    if (this._persistTimer) return false;
-    this._persistTimer = setTimeout(() => {
-      this._persistTimer = null;
-      this.persistSession(true);
-    }, 2000);
-    if (this._persistTimer.unref) this._persistTimer.unref();
-    return true;
-  }
-
-  _onCookieRotation(rotations) {
-    this._persistedRotations = this._persistedRotations || {};
-    for (const entry of rotations) {
-      const name = typeof entry === "string" ? entry : entry && entry.name;
-      if (!name) continue;
-      const seed = this._seedValues || {};
-      const previous = entry && entry.previous !== undefined ? entry.previous : seed[name];
-      this._persistedRotations[name] = {
-        previous: previous === undefined ? "" : previous,
-        value: this.cookies.get(name),
-        at: Date.now(),
-      };
-    }
-    this.persistSession(false);
   }
 
   _ensureConnectStarted() {
@@ -236,8 +152,6 @@ class Client extends EventEmitter {
   // --- Bootstrap / login --------------------------------------------------
 
   async loadMessagesPage() {
-    this._persistedDeviceID = this._persistedDeviceID || "";
-    this._persistedRotated = this._persistedRotated || {};
     const headers = this.http.buildHeaders({ withCookies: true, isSecFetchDocument: true });
     headers["referer"] = this.endpoints.base_url + "/";
     let res = await this.http.request(this.endpoints.messages, { method: "GET", headers });
@@ -259,9 +173,7 @@ class Client extends EventEmitter {
     if (!configs.versionID && this._loggedIn) {
       await this._crawlVersion(html);
     }
-    if (this._persistedDeviceID) {
-      configs.mqttWebDeviceID = this._persistedDeviceID;
-    } else if (!configs.mqttWebDeviceID) {
+    if (!configs.mqttWebDeviceID) {
       configs.mqttWebDeviceID = generateSessionID();
     }
     this.syncManager = this._newSyncManager();
@@ -274,7 +186,6 @@ class Client extends EventEmitter {
       if (range.ParentThreadKey !== undefined && !ptks.includes(range.ParentThreadKey)) ptks.push(range.ParentThreadKey);
     }
     if (ptks.length) configs.parentThreadKeys = ptks;
-    this.persistSession(true);
     return configs;
   }
 

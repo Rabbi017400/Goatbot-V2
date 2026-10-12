@@ -59,11 +59,13 @@ class Cookies {
     return [pxs[0], pxs[1]];
   }
 
+  // Applies Set-Cookie rotations to the in-memory jar (standard cookie-jar
+  // behaviour, matching mautrix-meta's HTTP client). Nothing is written to disk.
   updateFromResponse(headers) {
-    const rotated = [];
-    if (!headers) return rotated;
+    const updated = [];
+    if (!headers) return updated;
     const setCookie = headers.getSetCookie ? headers.getSetCookie() : headers.raw ? headers.raw()["set-cookie"] : null;
-    if (!setCookie) return rotated;
+    if (!setCookie) return updated;
     const now = Date.now();
     for (const raw of setCookie) {
       const [pair] = raw.split(";");
@@ -84,12 +86,11 @@ class Cookies {
         }
       }
       const remove = (maxAge !== null && maxAge <= 0) || (maxAge === null && expired);
-      const previous = this.values[name];
       if (remove) delete this.values[name];
       else this.values[name] = value;
-      rotated.push({ name, previous });
+      updated.push(name);
     }
-    return rotated;
+    return updated;
   }
 }
 

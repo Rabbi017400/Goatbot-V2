@@ -36,10 +36,8 @@ login({ appState: require("./appstate.json") }, (err, api) => {
 
 ## Reliability
 
-- Device id is persisted and reused across logins, so the account is not seen as
-  a new device every restart.
-- Server-rotated cookies are persisted and replayed correctly, while a freshly
-  re-exported `appState` always wins.
+- `account.txt` is the single source of truth: fca-meta never backs up or reuses
+  cookies from disk, so every redeploy logs in with exactly the committed session.
 - `sec-ch-ua` client hints are derived from the active user agent, so the
   fingerprint never disagrees with itself.
 - Wire behaviour matches the reference client (mautrix-meta) with nothing added
@@ -50,8 +48,8 @@ login({ appState: require("./appstate.json") }, (err, api) => {
   `0` to disable) the client re-runs the bootstrap and reconnects, so the
   session tokens and sync cursors never go stale on a long-running bot.
 
-Session state lives in `~/.fca-meta/<key>.json` and can be overridden with
-`options.store` (`{ dir, key, file }`, or `false` to disable).
+There is no on-disk session state; cookies live only in memory for the life of
+the process.
 
 ## Tests
 

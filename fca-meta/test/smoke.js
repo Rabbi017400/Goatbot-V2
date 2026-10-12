@@ -21,6 +21,12 @@ assert.strictEqual(cookies.isLoggedIn(), true);
 assert.strictEqual(cookies.getUserID(), "123");
 assert.strictEqual(cookies.toString(), "xs=abc; c_user=123");
 
+// Set-Cookie rotations update the in-memory jar only (no disk persistence).
+const rotated = cookies.updateFromResponse({ getSetCookie: () => ["xs=rotated; Path=/; Max-Age=3600", "fr=gone; Max-Age=0"] });
+assert.deepStrictEqual(rotated.sort(), ["fr", "xs"]);
+assert.strictEqual(cookies.get("xs"), "rotated");
+assert.strictEqual(cookies.get("fr"), "");
+
 const epoch = generateEpochID();
 assert.strictEqual(typeof epoch, "bigint");
 const encoded = stringifyBigInt({ epoch_id: epoch });
@@ -461,27 +467,6 @@ assert.strictEqual(typeof editMessage, "function");
 
   await assert.rejects(() => bumpMessage({ getCurrentUserID: () => "1" }, { bad: true }), /messageID/);
 
-  const { SessionStore, cookieKeyFromCookies } = require("../src/sessionStore");
-  const os = require("os");
-  const path = require("path");
-  const fs = require("fs");
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fca-meta-"));
-  const storeFile = path.join(tmp, "sess.json");
-  const store = new SessionStore({ file: storeFile });
-  assert.strictEqual(store.load(), null);
-  assert.strictEqual(cookieKeyFromCookies({ get: (k) => (k === "c_user" ? "42" : "") }), "u42");
-  const saved = store.save({ userID: "42", deviceID: "999", userAgent: "UA", cookies: { get: (k) => (k === "xs" ? "x" : k === "c_user" ? "42" : k === "datr" ? "d" : ""), values: { xs: "x", c_user: "42", datr: "d" } }, rotations: { xs: { previous: "old", value: "x", at: Date.now() } } });
-  assert.strictEqual(saved, true);
-  const loaded = store.load();
-  assert.strictEqual(loaded.deviceID, "999");
-  assert.ok(Array.isArray(loaded.cookies) && loaded.cookies.some((c) => c.key === "xs"));
-  assert.strictEqual(loaded.rotations.xs.previous, "old");
-  assert.strictEqual(store.clear(), true);
-  assert.strictEqual(store.load(), null);
-  const disabled = new SessionStore({ enabled: false, file: storeFile });
-  assert.strictEqual(disabled.save({ cookies: {} }), false);
-  fs.rmSync(tmp, { recursive: true, force: true });
-
   const { parseUserAgent, buildClientHints, USER_AGENT } = require("../src/useragent");
   const hints = buildClientHints(parseUserAgent(USER_AGENT));
   assert.ok(hints["sec-ch-ua"].includes('"Google Chrome";v="141"'), "ch-hints must match UA chrome version");
@@ -651,7 +636,7 @@ assert.strictEqual(typeof editMessage, "function");
   deliverHandle.stopListening();
 
   const { Client } = require("../src/client");
-  const autoOffClient = new Client({ appState: [{ key: "xs", value: "a" }, { key: "c_user", value: "1" }], autoReconnect: false, store: false });
+  const autoOffClient = new Client({ appState: [{ key: "xs", value: "a" }, { key: "c_user", value: "1" }], autoReconnect: false });
   autoOffClient._loggedIn = true;
   autoOffClient._socketWasConnected = true;
   autoOffClient._openSocket = async () => { throw new Error("boom"); };
@@ -706,7 +691,6 @@ assert.strictEqual(typeof editMessage, "function");
   // --- full/periodic reconnect (mautrix parity) ---------------------------
   const reconnectClient = new Client({
     cookies: cookiesFromAppState([{ key: "xs", value: "abc" }, { key: "c_user", value: "123" }]),
-    store: false,
     forceRefreshIntervalMs: 50000,
   });
   reconnectClient._loggedIn = true;
