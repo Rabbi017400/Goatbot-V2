@@ -169,7 +169,6 @@ class HTTPClient {
       const res = await fetch(url, options);
       const arrayBuffer = await res.arrayBuffer();
       const resBody = Buffer.from(arrayBuffer);
-      if (this.cookies) this.cookies.updateFromResponse(res.headers);
       return { status: res.status, headers: res.headers, body: resBody };
     } finally {
       clearTimeout(timer);

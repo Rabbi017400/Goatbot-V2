@@ -58,40 +58,6 @@ class Cookies {
     if (pxs.length !== 2) return ["1920", "1003"];
     return [pxs[0], pxs[1]];
   }
-
-  // Applies Set-Cookie rotations to the in-memory jar (standard cookie-jar
-  // behaviour, matching mautrix-meta's HTTP client). Nothing is written to disk.
-  updateFromResponse(headers) {
-    const updated = [];
-    if (!headers) return updated;
-    const setCookie = headers.getSetCookie ? headers.getSetCookie() : headers.raw ? headers.raw()["set-cookie"] : null;
-    if (!setCookie) return updated;
-    const now = Date.now();
-    for (const raw of setCookie) {
-      const [pair] = raw.split(";");
-      const eq = pair.indexOf("=");
-      if (eq === -1) continue;
-      const name = pair.slice(0, eq).trim();
-      const value = pair.slice(eq + 1).trim();
-      if (!name) continue;
-      let expired = false;
-      let maxAge = null;
-      for (const attr of raw.split(";").slice(1)) {
-        const [a, v] = attr.split("=");
-        const attrName = (a || "").trim().toLowerCase();
-        if (attrName === "max-age" && v !== undefined) maxAge = parseInt(v.trim(), 10);
-        else if (attrName === "expires" && v !== undefined) {
-          const t = Date.parse(v.trim());
-          expired = !Number.isNaN(t) && t < now;
-        }
-      }
-      const remove = (maxAge !== null && maxAge <= 0) || (maxAge === null && expired);
-      if (remove) delete this.values[name];
-      else this.values[name] = value;
-      updated.push(name);
-    }
-    return updated;
-  }
 }
 
 function cookiesFromAppState(appState) {

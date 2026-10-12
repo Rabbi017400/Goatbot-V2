@@ -241,10 +241,10 @@ the appState it was given (`account.txt`), so a redeploy always starts from the
 current committed session. There is no `sessionStore`, no `options.store`, and no
 `api.persistSession()` / `api.getDeviceID()`.
 
-- Cookie rotations from `Set-Cookie` are still applied to the in-memory jar
-  (`Cookies.updateFromResponse`, standard cookie-jar behaviour), but they are
-  never recorded or replayed on a later login. `Client._onCookieRotation` and
-  `src/sessionStore.js` are gone, along with `options.store`.
+- Cookie-rotation handling is removed entirely: `Cookies.updateFromResponse`,
+  `Client._onCookieRotation` and `src/sessionStore.js` are gone, along with
+  `options.store`. `Set-Cookie` responses are ignored; the in-memory jar keeps
+  the appState values.
 - The bootstrap `MqttWebDeviceID.clientID` is used as-is (a fresh one only when
   absent); there is no persisted device id to override it.
 - `api.logout()` just disconnects now that there is nothing to clear.

@@ -21,12 +21,6 @@ assert.strictEqual(cookies.isLoggedIn(), true);
 assert.strictEqual(cookies.getUserID(), "123");
 assert.strictEqual(cookies.toString(), "xs=abc; c_user=123");
 
-// Set-Cookie rotations update the in-memory jar only (no disk persistence).
-const rotated = cookies.updateFromResponse({ getSetCookie: () => ["xs=rotated; Path=/; Max-Age=3600", "fr=gone; Max-Age=0"] });
-assert.deepStrictEqual(rotated.sort(), ["fr", "xs"]);
-assert.strictEqual(cookies.get("xs"), "rotated");
-assert.strictEqual(cookies.get("fr"), "");
-
 const epoch = generateEpochID();
 assert.strictEqual(typeof epoch, "bigint");
 const encoded = stringifyBigInt({ epoch_id: epoch });
