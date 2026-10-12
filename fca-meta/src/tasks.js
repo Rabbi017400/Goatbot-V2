@@ -85,7 +85,7 @@ class TaskManager {
 
 // --- Individual tasks -----------------------------------------------------
 
-function sendMessageTask(client, { threadID, otid, text, replyToMessage, replyType, mentions, attachmentFBIds, stickerId, sendType, source, hotEmojiSize, url, attributionAppId, initiatingSource, powerUpStyle }) {
+function sendMessageTask(client, { threadID, otid, text, replyToMessage, replyType, mentions, attachmentFBIds, stickerId, sendType, source, hotEmojiSize, url, attributionAppId, initiatingSource, powerUpStyle, metadataDataclass }) {
   const payload = {
     thread_id: threadID,
     otid: String(otid),
@@ -102,6 +102,7 @@ function sendMessageTask(client, { threadID, otid, text, replyToMessage, replyTy
   if (hotEmojiSize) payload.hot_emoji_size = hotEmojiSize;
   if (stickerId) payload.sticker_id = stickerId;
   if (powerUpStyle) payload.power_up_style = powerUpStyle;
+  if (metadataDataclass) payload.metadata_dataclass = metadataDataclass;
   if (initiatingSource !== undefined) payload.initiating_source = initiatingSource;
   payload.skip_url_preview_gen = 0;
   payload.text_has_links = text && /https?:\/\//.test(text) ? 1 : 0;

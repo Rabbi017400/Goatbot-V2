@@ -232,6 +232,21 @@ function buildApi(client, globalOptions) {
   api.changeTheme = withCallback((prompt, threadID) => themeApi.changeTheme(client, prompt, threadID));
   api.setTheme = withCallback((threadID, themeID) => themeApi.setThreadTheme(client, threadID, themeID));
   api.searchMusic = withCallback((query, options) => musicApi.searchMusic(client, query, options));
+  api.sendMusicSticker = function sendMusicSticker(track, threadID, callback) {
+    if (typeof threadID === "function") {
+      callback = threadID;
+      threadID = undefined;
+    }
+    let song = track;
+    if (getType(song) === "Object") {
+      song = Object.assign({}, song, {
+        songId: song.songId || song.song_id || song.audioAssetId || song.audio_asset_id || song.id,
+      });
+    }
+    const promise = musicApi.sendMusicSticker(client, song, threadID);
+    if (callback) promise.then((d) => callback(null, d), (e) => callback(e));
+    return promise;
+  };
   api.changeAdminStatus = withCallback((threadID, adminIDs, adminStatus) => threadApi.changeAdminStatus(client, threadID, adminIDs, adminStatus));
   api.addUserToGroup = withCallback((userIDs, threadID) => threadApi.addUserToGroup(client, userIDs, threadID));
   api.removeUserFromGroup = withCallback((userID, threadID) => threadApi.removeUserFromGroup(client, userID, threadID));

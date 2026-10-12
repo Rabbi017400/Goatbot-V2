@@ -342,11 +342,17 @@ assert.ok(scoreTrack("Tere Pyaar mein", { title: "Terre Pyaar Mein", artist: "Hi
 assert.ok(scoreTrack("kesariya", { title: "Hum Bhool Gaye", artist: "Malik Tayyab" }) < 0.2);
 const musicEdges = [
   { node: { item: { display_id: "1", title: { text: "Balamua Maare" }, display_artist: { text: "Neelkamal Singh" } } } },
-  { node: { item: { display_id: "2", title: { text: "Kesariya" }, display_artist: { text: "Pritam" }, progressive_download: [{ url: "http://dl" }] } } },
-  { node: { item: { display_id: "3", title: { text: "Kesariya" }, display_artist: { text: "Ali Khan" } } } },
+  { node: { item: { display_id: "2", song_id: "2002", title: { text: "Kesariya" }, display_artist: { text: "Pritam" }, progressive_download: [{ url: "http://dl" }] } } },
+  { node: { item: { display_id: "3", song_id: "3003", title: { text: "Kesariya" }, display_artist: { text: "Ali Khan" } } } },
 ];
 const ranked = rankResults("kesariya", musicEdges, {});
 assert.deepStrictEqual(ranked.map((item) => item.id), ["2", "3"]);
+// The sticker id is `song_id`, not the picker `display_id`; tag containers
+// expose their tracks under `sub_items`.
+assert.strictEqual(ranked[0].songId, "2002");
+const tagged = rankResults("kesariya", [{ node: { item: { __typename: "MusicPickerMediaTagWithAudioAssetsWrapper" }, sub_items: musicEdges.map((e) => e.node.item) } }], {});
+assert.strictEqual(tagged.length, 2);
+assert.strictEqual(tagged[0].songId, "2002");
 const rawRanked = rankResults("kesariya", musicEdges, { exact: false });
 assert.strictEqual(rawRanked.length, 3);
 assert.strictEqual(rawRanked[0].score, 1);

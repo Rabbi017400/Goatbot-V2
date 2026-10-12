@@ -1,6 +1,18 @@
 "use strict";
 
-const MUSIC_SEARCH_QUERY = "StoriesCreateMusicSelectorMainPageQuery";
+const { sendMessageTask } = require("../tasks");
+const { generateOfflineThreadingID, generateTimestampString } = require("../utils");
+const { parsePublishResponse } = require("./decode");
+
+const MUSIC_SEARCH_QUERY = "useMWInboxTrayMusicNoteTypeaheadDataSourceQuery";
+const MUSIC_SEARCH_PRODUCT = "FB_NOTES";
+
+// A music sticker is a "share": the server builds the Armadillo XMA card from
+// metadata_dataclass (xma_music_sticker_message_metadata) and returns an
+// LSInsertXmaAttachment with content_type 3046. send_type 2 is what the app
+// uses. The id must be the note/sticker `song_id`, NOT the picker `id`/
+// `display_id`: the picker id is rejected for music stickers.
+const MUSIC_STICKER_SEND_TYPE = 2;
 
 const STOP_WORDS = new Set([
   "the", "a", "an", "of", "in", "on", "to", "me", "my", "and", "feat",
@@ -99,8 +111,9 @@ function normalizeTrack(item) {
     : [];
   return {
     id: String(item.display_id || item.id || ""),
+    songId: item.song_id === undefined || item.song_id === null ? null : String(item.song_id),
     title: (item.title && item.title.text) || (item.display_title && item.display_title.text) || "",
-    artist: (item.display_artist && item.display_artist.text) || "",
+    artist: (item.display_artist && item.display_artist.text) || (item.display_subtitle && item.display_subtitle.text) || "",
     album: item.album_title || "",
     duration: item.duration_in_ms === undefined || item.duration_in_ms === null ? null : Number(item.duration_in_ms),
     image: artwork.uri || null,
@@ -109,6 +122,17 @@ function normalizeTrack(item) {
     tags,
     raw: item,
   };
+}
+
+// The typeahead can wrap tracks in tag containers (e.g. "For you", "New
+// releases") with the actual AudioAsset nodes under `sub_items`; a plain track
+// result is `node.item`.
+function edgeItems(edge) {
+  const node = edge && edge.node;
+  if (!node) return [];
+  if (Array.isArray(node.sub_items) && node.sub_items.length) return node.sub_items;
+  if (node.item) return [node.item];
+  return [];
 }
 
 function extractEdges(response) {
@@ -125,11 +149,11 @@ function rankResults(query, edges, options) {
   const exact = options.exact !== false;
   const scored = [];
   for (const edge of edges) {
-    const item = edge && edge.node && edge.node.item;
-    if (!item) continue;
-    const track = normalizeTrack(item);
-    track.score = Number(scoreTrack(query, track).toFixed(4));
-    scored.push(track);
+    for (const item of edgeItems(edge)) {
+      const track = normalizeTrack(item);
+      track.score = Number(scoreTrack(query, track).toFixed(4));
+      scored.push(track);
+    }
   }
   scored.sort((a, b) => b.score - a.score);
   if (!exact) return scored;
@@ -148,12 +172,12 @@ async function searchMusic(client, query, options = {}) {
   const limit = Number.isFinite(options.limit) ? options.limit : 20;
   const variables = {
     params: { first },
-    product: options.product || "FB_CAMERA",
+    product: options.product || MUSIC_SEARCH_PRODUCT,
   };
   variables.params.search_text = query.trim();
   if (options.after || options.cursor) variables.params.after = String(options.after || options.cursor);
 
-  const response = await client.makeGraphQLRequest(MUSIC_SEARCH_QUERY, variables);
+  const response = await searchMusicRequest(client, variables, options);
   if (!response || (response.errors && response.errors.length)) {
     const err = new Error("searchMusic: music search query failed");
     err.res = response;
@@ -167,8 +191,113 @@ async function searchMusic(client, query, options = {}) {
   return results;
 }
 
+// The GraphQL music picker rejects requests with a stale fb_dtsg/lsd long before
+// the socket drops ("not logged in"/error envelope). Refresh the tokens once and
+// retry, so a long-running bot does not lose searchMusic mid-session.
+async function searchMusicRequest(client, variables, options) {
+  const ttl = options.tokenTTLMs;
+  if (typeof client.musicTokensStale === "function" && client.musicTokensStale(ttl)) {
+    try {
+      await client.refreshMusicSession();
+    } catch (_) { /* keep the cached tokens; the retry below is the last resort */ }
+  }
+  let response;
+  try {
+    response = await client.makeGraphQLRequest(MUSIC_SEARCH_QUERY, variables);
+  } catch (err) {
+    if (options.retryOnStale === false || typeof client.refreshMusicSession !== "function") throw err;
+    await client.refreshMusicSession(true);
+    response = await client.makeGraphQLRequest(MUSIC_SEARCH_QUERY, variables);
+    return response;
+  }
+  if (isStaleTokenResponse(response) && options.retryOnStale !== false && typeof client.refreshMusicSession === "function") {
+    await client.refreshMusicSession(true);
+    response = await client.makeGraphQLRequest(MUSIC_SEARCH_QUERY, variables);
+  }
+  return response;
+}
+
+function isStaleTokenResponse(response) {
+  if (!response) return true;
+  if (Array.isArray(response.errors) && response.errors.length) {
+    const text = JSON.stringify(response.errors).toLowerCase();
+    if (/csrf|token|logged|session|dtsg|lsd|login/.test(text)) return true;
+  }
+  const container = response.data && response.data.xfb_music_picker_connection_container;
+  return !container;
+}
+
+function buildMusicMetadata(track) {
+  const id = track && (track.songId || track.song_id || track.id);
+  if (id === undefined || id === null || id === "") {
+    throw new Error("sendMusicSticker: a track songId is required (use searchMusic to find one)");
+  }
+  const startTime = track.startTime !== undefined ? track.startTime
+    : track.start_time !== undefined ? track.start_time
+    : firstHighlight(track);
+  return {
+    xma_music_sticker_message_metadata: {
+      song_id: String(id),
+      start_time: String(startTime),
+      song_title: track.title || "",
+      song_subtitle: track.artist || track.subtitle || "",
+      is_explicit: Boolean(track.isExplicit),
+    },
+  };
+}
+
+function firstHighlight(track) {
+  const tags = track.tags || (track.raw && track.raw.tags) || [];
+  for (const tag of tags) {
+    if (tag && tag.type === "HIGHLIGHT_TIME_IN_MS" && tag.name !== undefined) return tag.name;
+  }
+  return "0";
+}
+
+function extractMusicMessageID(response) {
+  const table = parsePublishResponse(response);
+  const messages = [
+    ...(table.LSUpsertMessage || []),
+    ...(table.LSInsertMessage || []),
+    ...(table.LSDeleteThenInsertMessage || []),
+    ...(table.LSReplaceOptimsiticMessage || []),
+  ];
+  const first = messages.find((m) => m && m.MessageId);
+  return first ? first.MessageId : "";
+}
+
+// Send a music sticker. The server renders it as a share XMA (content_type
+// 3046) from the music metadata alone; no text, attachment or URL is involved.
+//   sendMusicSticker(track, threadID, callback)
+//   sendMusicSticker({ id, title, artist, startTime }, threadID, callback)
+async function sendMusicSticker(client, track, threadID) {
+  if (!threadID) throw new Error("sendMusicSticker: threadID is required");
+  if (typeof track === "string" || typeof track === "number") track = { songId: track };
+  const metadataDataclass = JSON.stringify(buildMusicMetadata(track));
+  const payload = sendMessageTask(client, {
+    threadID: String(threadID),
+    otid: generateOfflineThreadingID(),
+    sendType: MUSIC_STICKER_SEND_TYPE,
+    metadataDataclass,
+  }).payload;
+  const response = await client.sendTasks([{ label: "46", payload, queueName: String(threadID) }]);
+  const messageID = extractMusicMessageID(response);
+  if (!messageID) {
+    const err = new Error("sendMusicSticker: server did not accept the music sticker");
+    err.res = response;
+    throw err;
+  }
+  return {
+    messageID,
+    threadID: String(threadID),
+    timestamp: generateTimestampString(),
+    songID: String(track.songId || track.song_id || track.id),
+  };
+}
+
 module.exports = {
   searchMusic,
+  sendMusicSticker,
   scoreTrack,
   normalize,
   tokenMatches,

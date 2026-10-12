@@ -44,6 +44,7 @@ function buildSendPayload(threadID, fields) {
     url: fields.url,
     initiatingSource: fields.initiatingSource !== undefined ? fields.initiatingSource : INITIATING_SOURCE.FACEBOOK_INBOX,
     powerUpStyle: fields.powerUpStyle,
+    metadataDataclass: fields.metadataDataclass,
   }).payload;
 }
 

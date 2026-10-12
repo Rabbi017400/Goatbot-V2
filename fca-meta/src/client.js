@@ -318,13 +318,38 @@ class Client extends EventEmitter {
           html.match(/"fb_dtsg"\s*:\s*"([^"]+)"/);
         if (!dtsgMatch) continue;
         const jazoestMatch = html.match(/name="jazoest"[^>]*?value="([^"]+)"/) || html.match(/value="([^"]+)"[^>]*?name="jazoest"/);
+        const lsdMatch = html.match(/"LSD"\s*,\s*\[\s*\]\s*,\s*\{\s*"token"\s*:\s*"([^"]+)"/);
         this.configs.dtsg = dtsgMatch[1];
         if (jazoestMatch) this.configs.jazoest = jazoestMatch[1];
+        if (lsdMatch) {
+          this.configs.lsd = lsdMatch[1];
+          this.http.configs.lsd = lsdMatch[1];
+        }
         return { fb_dtsg: this.configs.dtsg, jazoest: this.configs.jazoest };
       } catch (_) { /* try next source */ }
     }
     if (this.configs.dtsg) return { fb_dtsg: this.configs.dtsg, jazoest: this.configs.jazoest };
     throw new Error("refreshTokens: could not find fb_dtsg");
+  }
+
+  // GraphQL endpoints (searchMusic, themes, thread info) start failing once the
+  // bootstrap tokens go stale, which happens well before the socket drops. The
+  // cached dtsg/lsd are refreshed lazily: `musicTokensStale` reports whether the
+  // last refresh is older than `options.musicTokenTTLMs`, and `refreshMusicSession`
+  // re-runs the token fetch (debounced) so callers can retry once.
+  musicTokensStale(ttlMs) {
+    const ttl = ttlMs === undefined ? 10 * 60 * 1000 : Number(ttlMs);
+    if (!this.configs || !this.configs.dtsg) return true;
+    if (!this._lastTokenRefresh) return true;
+    return Date.now() - this._lastTokenRefresh >= ttl;
+  }
+
+  async refreshMusicSession(force) {
+    const now = Date.now();
+    if (!force && this._lastTokenRefresh && now - this._lastTokenRefresh < 60000) return false;
+    this._lastTokenRefresh = now;
+    await this.refreshTokens();
+    return true;
   }
 
   async _crawlVersion(html) {

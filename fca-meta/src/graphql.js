@@ -158,6 +158,10 @@ const GraphQLDocs = {
     docID: "23943555345255534",
     friendlyName: "StoriesCreateMusicSelectorMainPageQuery",
   },
+  useMWInboxTrayMusicNoteTypeaheadDataSourceQuery: {
+    docID: "24439058322365411",
+    friendlyName: "useMWInboxTrayMusicNoteTypeaheadDataSourceQuery",
+  },
 };
 
 const IGD_SLIDE_DELTA_PROCESSOR_QUERY = "27931342966497053";

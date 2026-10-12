@@ -81,13 +81,35 @@ music search scoring/ranking logic.
 - `api.changeTheme(prompt, threadID)` generates a theme from a prompt and applies
   it in one call.
 - `api.searchMusic(query, options)` runs
-  `StoriesCreateMusicSelectorMainPageQuery` (doc_id `23943555345255534`) with
-  `variables.params.search_text`. The picker is fuzzy and returns unrelated
-  tracks first, so results are re-ranked by a weighted query/title/artist/album
-  token score (`src/api/music.js`) and filtered to real matches by default
-  (`exact: false` returns everything, `limit` caps the count). Each result is
-  `{ id, title, artist, album, duration, image, url, isSaved, tags, score }`;
-  the returned array also carries `cursor` / `hasMore`.
+  `useMWInboxTrayMusicNoteTypeaheadDataSourceQuery` (doc_id `24439058322365411`,
+  product `FB_NOTES`) with `variables.params.search_text`. This is the
+  Messenger "note music" typeahead, the same catalogue the music-sticker picker
+  uses. The picker is fuzzy and returns unrelated tracks first, so results are
+  re-ranked by a weighted query/title/artist/album token score (`src/api/music.js`)
+  and filtered to real matches by default (`exact: false` returns everything,
+  `limit` caps the count). Each result is
+  `{ id, songId, title, artist, album, duration, image, url, isSaved, tags, score }`;
+  the returned array also carries `cursor` / `hasMore`. Tag containers (e.g.
+  "For you") are flattened from their `sub_items`.
+- The search catalogue ids are **not** sticker ids: `id`/`display_id` is the
+  picker/audio-asset id and the server rejects it on send, while `song_id` is
+  the note/sticker id the server accepts. Always send the `songId`.
+- `api.sendMusicSticker(track, threadID, callback)` sends a music sticker. The
+  track may be a `searchMusic` result or `{ songId, title, artist, startTime }`;
+  a bare string/number is treated as the `songId`. It sends the label-46 task
+  with `send_type: 2` and
+  `metadata_dataclass = {"xma_music_sticker_message_metadata":{"song_id",
+  "start_time","song_title","song_subtitle","is_explicit"}}`; the server renders
+  the XMA card itself (no text/attachment/URL). Returns
+  `{ messageID, threadID, timestamp, songID }`.
+- The GraphQL music search (`searchMusic`, themes, thread info) starts failing
+  once the bootstrap `fb_dtsg`/`lsd` go stale, well before the socket drops.
+  `searchMusicRequest` calls `client.musicTokensStale()` /
+  `client.refreshMusicSession()`: a stale (or error-enveloped) request triggers
+  one `refreshTokens()` (re-reads `fb_dtsg`/`jazoest`/`lsd` from
+  `facebook.com/messages`, `/`, `m.facebook.com/`) and a single retry.
+  `options.tokenTTLMs` (default 10 min) tunes the staleness window,
+  `options.retryOnStale: false` disables the retry.
 
 ## Message retrieval (GraphQL)
 
@@ -352,9 +374,16 @@ without a new server API.
   The vendored `fca-meta/assets/avatar/*.gif` are required for this to work —
   keep them in sync with the source repo.
 
-## Goat-Bot-V2 commands: `sing` and `effect`
+## Goat-Bot-V2 commands: `sing`, `effect` and `music`
 
-- Both live in `/workspace/goat-bot-v2/scripts/cmds/` (author `Neoaz 🐊`, `en` only).
+- `sing` and `effect` live in `/workspace/goat-bot-v2/scripts/cmds/` (author
+  `Neoaz 🐊`, `en` only). `sing` sends an actual audio file (`-c <count>` shows a
+  picker) and no longer owns the `music` alias.
+- `music` (`scripts/cmds/music.js`) sends a Messenger **music sticker**: it runs
+  `api.searchMusic`, keeps tracks that have a `songId`, and calls
+  `api.sendMusicSticker(track, threadID)`. `-c <count>` shows the same picker /
+  `onReply` choose flow as `sing`. Only tracks with a `songId` are listed, since
+  the catalogue `id` is rejected by the sticker endpoint.
 - They must not post progress/processing text. React to the invoking message
   (`message.reaction(emoji, event.messageID)`) with `⏳` / `✅` / `❌` instead.
 - `sing` uses `api.searchMusic(query, { limit, exact: false })`; only tracks with

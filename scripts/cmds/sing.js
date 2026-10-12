@@ -28,7 +28,7 @@ function extensionFrom(contentType) {
 module.exports = {
 	config: {
 		name: "sing",
-		aliases: ["music", "song"],
+		aliases: ["song"],
 		version: "1.0",
 		author: "Neoaz 🐊",
 		countDown: 5,
