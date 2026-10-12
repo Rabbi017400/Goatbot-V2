@@ -11,6 +11,12 @@ const { delay } = require("./utils");
 const { parseLossless } = require("./bigjson");
 const { buildDispatcher } = require("./tls");
 
+// Use undici's own fetch rather than the runtime global. The dispatcher built
+// in ./tls is an undici@6 Agent; Node's bundled fetch ships a different (newer)
+// undici whose Handler interface rejects that Agent with
+// "InvalidArgumentError: invalid onError method" on Node >=26.
+const { fetch: undiciFetch } = require("undici");
+
 const ANTI_JS_PREFIX = Buffer.from("for (;;);");
 const MAX_RETRIES = 5;
 
@@ -166,7 +172,7 @@ class HTTPClient {
         signal: controller.signal,
       };
       if (this.dispatcher) options.dispatcher = this.dispatcher;
-      const res = await fetch(url, options);
+      const res = await undiciFetch(url, options);
       const arrayBuffer = await res.arrayBuffer();
       const resBody = Buffer.from(arrayBuffer);
       return { status: res.status, headers: res.headers, body: resBody };

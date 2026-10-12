@@ -707,5 +707,23 @@ assert.strictEqual(typeof editMessage, "function");
   assert.strictEqual(reconnectClient.resetCount, 1, "a permanent error must stop full reconnects");
   reconnectClient.disconnect();
 
+  // --- HTTP client dispatcher compatibility -------------------------------
+  // The client must send its undici@6 dispatcher through undici's own fetch.
+  // Node's built-in fetch ships a newer undici whose Handler rejects the Agent
+  // ("invalid onError method"), which broke login on Node >=26.
+  {
+    const httpMod = require("http");
+    const { HTTPClient } = require("../src/http");
+    const server = httpMod.createServer((req, res) => { res.writeHead(200); res.end("ok"); });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+    const client = new HTTPClient({ cookies: cookiesFromAppState([{ key: "xs", value: "abc" }, { key: "c_user", value: "123" }]) });
+    assert.ok(client.dispatcher, "a dispatcher must be built by default");
+    const res = await client.request(`http://127.0.0.1:${port}/`);
+    assert.strictEqual(res.status, 200, "request with a dispatcher must succeed");
+    assert.strictEqual(res.body.toString(), "ok");
+    await new Promise((resolve) => server.close(resolve));
+  }
+
   console.log("smoke: all assertions passed");
 })();

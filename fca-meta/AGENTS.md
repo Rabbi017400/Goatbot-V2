@@ -415,6 +415,20 @@ without a new server API.
 - `account.txt` (upstream) is a tracked credentials file. Do not add it to a
   new remote or print its contents; treat it as secret-bearing.
 
+## Node runtime compatibility (fetch dispatcher)
+
+- `src/http.js` must use undici's own `fetch` (`require("undici").fetch`), NOT
+  the runtime global `fetch`. The dispatcher built in `src/tls.js` is an
+  `undici@6 Agent`; Node's built-in fetch ships a newer bundled undici whose
+  `Handler` interface rejects that Agent with
+  `InvalidArgumentError: invalid onError method` (surfaced as
+  `TypeError: fetch failed`). This broke every request, including login, on
+  Node >=26 (Render resolved the `>=20` engine to 26.11.1). undici's `fetch`
+  and the `Agent` are the same version, so they always match; its `Headers`
+  still exposes `getSetCookie()`.
+- Covered by a networkless regression in `test/smoke.js` (local http server +
+  `HTTPClient.request`).
+
 ## Port binding (Render / PaaS)
 
 - Render runs the bot as a web service and requires the process to bind a port.
