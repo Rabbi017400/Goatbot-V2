@@ -17,7 +17,8 @@ module.exports = {
 			en: "{pn} <tin nhắn>"
 		},
 		envConfig: {
-			delayPerGroup: 250
+			delayPerGroup: 1500,
+			maxGroups: 50
 		}
 	},
 
@@ -39,7 +40,7 @@ module.exports = {
 	},
 
 	onStart: async function ({ message, api, event, args, commandName, envCommands, threadsData, getLang }) {
-		const { delayPerGroup } = envCommands[commandName];
+		const { delayPerGroup, maxGroups } = envCommands[commandName];
 		if (!args[0])
 			return message.reply(getLang("missingMessage"));
 		const formSend = {
@@ -52,7 +53,14 @@ module.exports = {
 			)
 		};
 
-		const allThreadID = (await threadsData.getAll()).filter(t => t.isGroup && t.members.find(m => m.userID == api.getCurrentUserID())?.inGroup);
+		const allGroups = (await threadsData.getAll()).filter(t => t.isGroup && t.members.find(m => m.userID == api.getCurrentUserID())?.inGroup);
+		// Blasting every group with an identical message is one of the fastest ways
+		// to get a session flagged, so cap the fan-out per run and jitter the
+		// per-group delay instead of a fixed machine cadence.
+		const cap = Number(maxGroups) > 0 ? Number(maxGroups) : allGroups.length;
+		const allThreadID = allGroups.slice(0, cap);
+		if (allThreadID.length < allGroups.length)
+			message.reply(`⚠️ ${allGroups.length - allThreadID.length} group(s) skipped (maxGroups=${cap}).`);
 		message.reply(getLang("sendingNotification", allThreadID.length));
 
 		let sendSucces = 0;
@@ -66,7 +74,8 @@ module.exports = {
 					threadID: tid,
 					pending: api.sendMessage(formSend, tid)
 				});
-				await new Promise(resolve => setTimeout(resolve, delayPerGroup));
+				const base = Number(delayPerGroup) || 0;
+				await new Promise(resolve => setTimeout(resolve, base + Math.floor(Math.random() * base)));
 			}
 			catch (e) {
 				sendError.push(tid);

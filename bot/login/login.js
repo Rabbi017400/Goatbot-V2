@@ -1134,7 +1134,11 @@ async function startBot(loginWithEmail) {
 					}
 					try {
 						await stopListening();
-						await sleep(1000);
+						// Reconnect after a randomized, non-trivial gap. A fixed 1s
+						// cycle every hour is a machine-like cadence that gets the
+						// account flagged; jitter it and give the session a short break.
+						const configuredDelay = Number(restartListenMqtt.delayAfterStopListening) || 0;
+						await sleep(configuredDelay + Math.floor(Math.random() * 60000) + 30000);
 						global.GoatBot.Listening = api.listenMqtt(createCallBackListen());
 						log.info("LISTEN_MQTT", getText('login', 'restartListenMessage2'));
 					}

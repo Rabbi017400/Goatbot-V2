@@ -130,12 +130,17 @@ function isReadableStream(obj) {
   );
 }
 
+// Strip only the UTF-8 BOM / U+FEFF zero-width no-break space (bytes EF BB BF).
+// The previous version matched EF B8 8F, which is U+FE0F (VARIATION SELECTOR-16);
+// it silently deleted the variation selector that turns a plain emoji into its
+// emoji-presentation form (e.g. it turned "\u2764\uFE0F" into "\u2764"). It also
+// used the wrong byte order (UTF-8 is EF BB BF) so the BOM check never matched.
 function removeSpecialChar(inputString) {
   if (typeof inputString !== "string") return inputString;
   const buffer = Buffer.from(inputString, "utf8");
   let filteredBuffer = Buffer.alloc(0);
   for (let i = 0; i < buffer.length; i++) {
-    if (buffer[i] === 0xef && buffer[i + 1] === 0xb8 && buffer[i + 2] === 0x8f) {
+    if (buffer[i] === 0xef && buffer[i + 1] === 0xbb && buffer[i + 2] === 0xbf) {
       i += 2;
     } else {
       filteredBuffer = Buffer.concat([filteredBuffer, buffer.slice(i, i + 1)]);

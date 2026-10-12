@@ -1,22 +1,12 @@
 const cheerio = require("cheerio");
 const qs = require('qs');
+const path = require('path');
+const { buildDocumentHeaders } = require(path.join(process.cwd(), "fca-meta/src/useragent"));
 
 const targetCookie = "https://m.facebook.com/";
 const urlLoginCheckpoint = "https://m.facebook.com/login/checkpoint/?next=https://m.facebook.com/home.php?refsrc=deprecated";
 
-const headers = {
-	"accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
-	"accept-language": "vi,en-US;q=0.9,en;q=0.8",
-	"sec-ch-ua": "\" Not;A Brand\";v=\"99\", \"Microsoft Edge\";v=\"103\", \"Chromium\";v=\"103\"",
-	"sec-ch-ua-mobile": "?0",
-	"sec-ch-ua-platform": "\"Windows\"",
-	"sec-fetch-dest": "document",
-	"sec-fetch-mode": "navigate",
-	"sec-fetch-site": "none",
-	"sec-fetch-user": "?1",
-	"upgrade-insecure-requests": "1",
-	"user-agent": "Mozilla/5.0 (Linux; Android 12; M2102J20SG) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.0.0 Mobile Safari/537.36"
-};
+const headers = buildDocumentHeaders();
 
 async function checkAndSaveCookies(jar, headers, request) {
 	const resHome = await request({

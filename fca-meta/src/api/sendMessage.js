@@ -1,11 +1,16 @@
 "use strict";
 
-const { getType, generateOfflineThreadingID, removeSpecialChar, toBigOrNumber } = require("../utils");
-const { sendMessageTask, createGroupTask } = require("../tasks");
+const { getType, generateOfflineThreadingID, removeSpecialChar, toBigOrNumber, delay } = require("../utils");
+const { sendMessageTask, createGroupTask, THREAD_SOURCE, INITIATING_SOURCE } = require("../tasks");
 const { uploadAttachment } = require("./upload");
 const { parsePublishResponse } = require("./decode");
 
 const ALLOWED_PROPERTIES = ["attachment", "url", "sticker", "emoji", "emojiSize", "body", "mentions", "location", "replyToMessage"];
+
+// Typing-indicator timing for the pre-send "composing" signal.
+const TYPING_MS_PER_CHAR = 20;
+const TYPING_MIN_MS = 250;
+const TYPING_MAX_MS = 1500;
 
 function buildMentions(msg) {
   if (!msg.mentions) return null;
@@ -78,13 +83,19 @@ async function sendMessage(client, msg, threadID, options = {}) {
   }
 
   const otid = generateOfflineThreadingID();
-  if (client.safety && client.safety.enabled && typeof body === "string" && body) {
+  // Show a typing indicator before a text send, like a real client composing the
+  // message. Presence is stateless (not queued with the message) so it does not
+  // interfere with the send task.
+  if (options.typingIndicator !== false && typeof body === "string" && body) {
     let isGroup = options.isGroup;
     if (isGroup === undefined && client.formatter && typeof client.formatter.getThreadMeta === "function") {
       const meta = client.formatter.getThreadMeta(targetThread);
       if (meta && meta.isGroup !== undefined) isGroup = meta.isGroup;
     }
-    await client.safety.simulateTyping(targetThread, body, isGroup);
+    const sendTyping = require("./thread").sendTypingIndicator;
+    await sendTyping(client, targetThread, true, isGroup).catch(() => {});
+    await delay(Math.min(TYPING_MAX_MS, Math.max(TYPING_MIN_MS, TYPING_MS_PER_CHAR * body.length)));
+    await sendTyping(client, targetThread, false, isGroup).catch(() => {});
   }
   const task = sendMessageTask(client, {
     threadID: toBigOrNumber(targetThread),
@@ -95,9 +106,9 @@ async function sendMessage(client, msg, threadID, options = {}) {
     attachmentFBIds,
     stickerId,
     sendType,
-    source: 0,
+    source: THREAD_SOURCE.MESSENGER_INBOX_IN_THREAD,
     hotEmojiSize,
-    initiatingSource: 1,
+    initiatingSource: INITIATING_SOURCE.FACEBOOK_INBOX,
   });
 
   const response = await client.sendTasks([task]);

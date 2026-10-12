@@ -42,8 +42,13 @@ login({ appState: require("./appstate.json") }, (err, api) => {
   re-exported `appState` always wins.
 - `sec-ch-ua` client hints are derived from the active user agent, so the
   fingerprint never disagrees with itself.
-- A default-on safety layer paces outgoing actions, jitters reconnects and
-  opens a circuit breaker on rate limits (`429`) instead of retry-storming.
+- Wire behaviour matches the reference client (mautrix-meta) with nothing added
+  on top: no throttling layer, no reconnect jitter and no keep-alive tasks. The
+  only human-like signal is a typing indicator sent before a text message.
+- The connection is force-refreshed on a timer like mautrix-meta's
+  `periodicReconnect`: every 20h (configurable with `forceRefreshIntervalMs`,
+  `0` to disable) the client re-runs the bootstrap and reconnects, so the
+  session tokens and sync cursors never go stale on a long-running bot.
 
 Session state lives in `~/.fca-meta/<key>.json` and can be overridden with
 `options.store` (`{ dir, key, file }`, or `false` to disable).

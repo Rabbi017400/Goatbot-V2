@@ -11,7 +11,6 @@ const { TaskManager } = require("./tasks");
 const { FacebookEndpoints, MessengerEndpoints } = require("./endpoints");
 const { USER_AGENT, ASBD_ID } = require("./useragent");
 const { generateSessionID, stringifyBigInt } = require("./utils");
-const { Safety, DEFAULT_SAFETY } = require("./safety");
 const { SessionStore, cookieKeyFromCookies } = require("./sessionStore");
 const { getDoc } = require("./graphql");
 
@@ -20,6 +19,10 @@ const RECURSE_DATABASES = new Set([1, 2, 95, 104]);
 const SYNC_RESPONSE_TIMEOUT = 30000;
 const MAX_SYNC_RECURSION = 50;
 const MAX_CONNECT_BACKOFF = 5 * 60 * 1000;
+// mautrix-meta defaults: force a full reconnect every 20h, but never sooner
+// than 1h apart (pkg/connector/example-config.yaml).
+const DEFAULT_FORCE_REFRESH_MS = 72000 * 1000;
+const DEFAULT_MIN_FULL_RECONNECT_MS = 3600 * 1000;
 
 function formatFloat(value) {
   if (value === undefined || value === null || value === "") return "1";
@@ -62,12 +65,13 @@ class Client extends EventEmitter {
     this._connectReject = null;
     this._canSendMessagesWaiters = [];
     this._firstConnectSettled = false;
-    this.safety = new Safety(this, Object.assign({}, DEFAULT_SAFETY, options.safety));
+    this._lastFullReconnect = 0;
+    this._periodicReconnectTimer = null;
+    this.permanentErrored = false;
     this.sessionStore = this._buildSessionStore(options);
     this._persistTimer = null;
     this._seedValues = this.cookies.getAll();
     this.http.onCookieRotation = (rotations) => this._onCookieRotation(rotations);
-    this.http.onRateLimit = (retryAfterMs) => this.safety.noteRateLimit(retryAfterMs);
     this.loadPersistedSession();
   }
 
@@ -248,6 +252,7 @@ class Client extends EventEmitter {
 
     const { configs, lsTable } = parseBootstrap(html);
     this.configs = configs;
+    this.http.configs = configs;
     this.lsTable = lsTable;
     this._loggedIn = configs.isAuthenticated();
 
@@ -442,7 +447,7 @@ class Client extends EventEmitter {
 
     const headers = this.http.buildHeaders({ withCookies: true });
     headers["x-fb-friendly-name"] = doc.friendlyName;
-    headers["x-fb-lsd"] = this.configs.lsd || "";
+    if (this.configs.lsd) headers["x-fb-lsd"] = this.configs.lsd;
     headers["origin"] = this.endpoints.base_url;
     headers["referer"] = this.endpoints.messages + "/";
 
@@ -509,6 +514,7 @@ class Client extends EventEmitter {
     loop.then(
       () => {
         if (this._loopPromise === loop) this._loopPromise = null;
+        if (this._connectPromise) this._connectPromise = null;
         if (this._connectReject) {
           const reject = this._connectReject;
           this._connectReject = null;
@@ -518,6 +524,7 @@ class Client extends EventEmitter {
       },
       (err) => {
         if (this._loopPromise === loop) this._loopPromise = null;
+        if (this._connectPromise) this._connectPromise = null;
         if (this._connectReject) {
           const reject = this._connectReject;
           this._connectReject = null;
@@ -526,11 +533,14 @@ class Client extends EventEmitter {
         }
       }
     );
+    // mautrix starts the force-refresh loop right after Connect returns.
+    this._schedulePeriodicReconnect();
     return this._connectPromise;
   }
 
   async reset() {
     this._stopping = true;
+    this._stopPeriodicReconnect();
     this._wakeBackoff();
     this._clearCanSendMessagesWaiters();
     this._clearSocketSyncWaiters();
@@ -558,6 +568,7 @@ class Client extends EventEmitter {
 
   async _runConnectionLoop() {
     if (!this._loggedIn) throw new Error("client is not authenticated, cannot connect");
+    this.permanentErrored = false;
     let connectionAttempts = 1;
     let reconnectIn = 0;
     for (;;) {
@@ -576,6 +587,7 @@ class Client extends EventEmitter {
 
       if (err && err.closeCode === 4003) {
         err.message = "Not logged in.";
+        this.permanentErrored = true;
         this._emitError(err);
         this.emit("permanent-error", err);
         this._clearCanSendMessagesWaiters();
@@ -599,6 +611,20 @@ class Client extends EventEmitter {
       }
 
       this.emit("transient-disconnect", { error: err, connectionAttempts });
+      if (this.options.autoReconnect === false) {
+        const stopErr = err || new Error("connection closed");
+        this.permanentErrored = true;
+        this._emitError(stopErr);
+        this.emit("permanent-error", stopErr);
+        this._clearCanSendMessagesWaiters();
+        if (this._connectReject) {
+          const reject = this._connectReject;
+          this._connectReject = null;
+          this._connectResolve = null;
+          reject(stopErr);
+        }
+        return;
+      }
       if (Date.now() - connectStart > 2 * 60 * 1000 && this._socketWasConnected) {
         reconnectIn = 0;
         connectionAttempts = 0;
@@ -614,7 +640,7 @@ class Client extends EventEmitter {
         const timer = setTimeout(() => {
           this._backoffResolve = null;
           resolve();
-        }, this.safety.jitterReconnect(reconnectIn));
+        }, reconnectIn);
         if (timer.unref) timer.unref();
       });
       this.http.updateProxy(this.options.proxy);
@@ -694,31 +720,64 @@ class Client extends EventEmitter {
     if (!reconnect) {
       await this._sendInitialThreadFetch();
     }
-    await this._ensureSyncedSocketWithRetry(BASE_SYNC_DATABASES);
+    await this._ensureSyncedSocket(BASE_SYNC_DATABASES);
     this.socketWasSynced = true;
+    this._socketWasConnected = true;
     this.emit("ready", { reconnect });
   }
 
-  async _ensureSyncedSocketWithRetry(databases) {
-    let lastErr = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        await this._ensureSyncedSocket(databases);
-        return;
-      } catch (err) {
-        lastErr = err;
-        if (this._stopping) throw err;
-        await new Promise((resolve) => {
-          const timer = setTimeout(resolve, 500 * (attempt + 1));
-          if (timer.unref) timer.unref();
-        });
-      }
+  // mautrix-meta forces a full reconnect every ForceRefreshIntervalSeconds
+  // (default 20h) so the bootstrap config (fb_dtsg, LSD, version id, sync
+  // cursors) is re-fetched on a long-lived session instead of going stale.
+  _schedulePeriodicReconnect() {
+    this._stopPeriodicReconnect();
+    const raw = this.options.forceRefreshIntervalMs;
+    if (raw === 0) return;
+    const ms = Number.isFinite(Number(raw)) && Number(raw) > 0 ? Number(raw) : DEFAULT_FORCE_REFRESH_MS;
+    this._periodicReconnectTimer = setTimeout(() => {
+      this._periodicReconnectTimer = null;
+      this.fullReconnect().catch((err) => this._emitError(err));
+    }, ms);
+    if (this._periodicReconnectTimer.unref) this._periodicReconnectTimer.unref();
+  }
+
+  _stopPeriodicReconnect() {
+    if (this._periodicReconnectTimer) {
+      clearTimeout(this._periodicReconnectTimer);
+      this._periodicReconnectTimer = null;
     }
-    throw lastErr;
+  }
+
+  canReconnect() {
+    const raw = Number(this.options.minFullReconnectMs);
+    const min = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MIN_FULL_RECONNECT_MS;
+    return this._loggedIn && Date.now() - this._lastFullReconnect > min;
+  }
+
+  // Tear the connection down, re-run the bootstrap (fresh tokens + sync state)
+  // and reconnect. Mirrors mautrix-meta's MetaClient.FullReconnect.
+  async fullReconnect() {
+    if (this.permanentErrored || !this._loggedIn) return;
+    if (!this.canReconnect()) {
+      this._schedulePeriodicReconnect();
+      return;
+    }
+    this._lastFullReconnect = Date.now();
+    this.socketWasSynced = false;
+    await this.reset();
+    try {
+      await this.loadMessagesPage();
+    } catch (err) {
+      this._emitError(err);
+    }
+    if (this._stopping || this.permanentErrored) return;
+    await this.connect().catch((err) => this._emitError(err));
+    this._schedulePeriodicReconnect();
   }
 
   disconnect() {
     this._stopping = true;
+    this._stopPeriodicReconnect();
     this._wakeBackoff();
     this._clearCanSendMessagesWaiters();
     const socket = this.socket;
@@ -770,19 +829,10 @@ class Client extends EventEmitter {
         await this.waitUntilCanSendMessages();
       } catch (_) { /* proceed and let the request fail if still disconnected */ }
     }
-    const queue = this.safety.enabled && Array.isArray(tasks) && tasks.length === 1 ? tasks[0].queueName : undefined;
-    await this.safety.acquire(queue);
     const tm = new TaskManager(this);
     for (const task of tasks) tm.addTask(task.label, task.payload, task.queueName);
     const payload = tm.finalizePayload();
-    try {
-      const result = await this._makeLSRequestViaSocket(payload, type);
-      this.safety.noteResult(null);
-      return result;
-    } catch (err) {
-      this.safety.noteResult(err);
-      throw err;
-    }
+    return this._makeLSRequestViaSocket(payload, type);
   }
 
   async sendStatelessTask(task) {

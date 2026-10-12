@@ -1,7 +1,6 @@
 "use strict";
 
 const { EventEmitter } = require("events");
-const { reportAppStateTask } = require("./tasks");
 
 function makeStopHandle(emitter, client) {
   return {
@@ -76,6 +75,14 @@ function listenMqtt(client, formatter, callback, options) {
         else client._messageThreadMap.set(String(event.messageID), event.threadID);
       }
       deliver(event);
+      if (!isReplay(event)) {
+        if (options.autoMarkDelivery && event.messageID && event.threadID) {
+          require("./api/thread").markAsDelivered(client, event.threadID, event.messageID).catch(() => {});
+        }
+        if (options.autoMarkRead && event.threadID) {
+          require("./api/thread").markAsRead(client, event.threadID, event.timestamp).catch(() => {});
+        }
+      }
     }
   };
   const onReady = () => {
@@ -97,27 +104,10 @@ function listenMqtt(client, formatter, callback, options) {
     if (!stopped) onPermanentError(err);
   });
 
-  // Mark the session as foreground so typing/presence flows (unless disabled).
-  if (client.safety && client.safety.presence) {
-    client.sendTasks([reportAppStateTask(1)]).catch(() => {});
-  }
-
-  // Keep fb_dtsg/jazoest fresh for long-running bot accounts. Facebook rejects
-  // stale tokens with "Please try closing and re-opening your browser window".
-  const refreshMs = options.refreshIntervalMs || 12 * 60 * 60 * 1000;
-  let refreshTimer = null;
-  if (typeof client.refreshTokens === "function") {
-    refreshTimer = setInterval(() => {
-      client.refreshTokens().catch(() => {});
-    }, refreshMs);
-    if (refreshTimer.unref) refreshTimer.unref();
-  }
-
   const handle = makeStopHandle(emitter, client);
   const result = emitter;
   result.stopListening = (cb) => {
     stopped = true;
-    if (refreshTimer) clearInterval(refreshTimer);
     client.removeListener("ls-table", onTable);
     client.removeListener("ready", onReady);
     client.removeListener("permanent-error", onPermanentError);

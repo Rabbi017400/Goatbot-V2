@@ -94,6 +94,8 @@ async function postGraphqlBatch(client, url, form) {
   const body = new URLSearchParams(buildForm(client, form)).toString();
   const headers = client.http.buildHeaders({ withCookies: true });
   headers["content-type"] = "application/x-www-form-urlencoded";
+  headers["x-fb-lsd"] = (client.configs && client.configs.lsd) || "";
+  headers["x-fb-friendly-name"] = form && (form.fb_api_req_friendly_name || form.batch_name || form.__friendlyName) || "";
   headers["origin"] = client.getEndpoint("base_url");
   headers["referer"] = client.getEndpoint("base_url") + "/";
   const res = await client.http.request(url, { method: "POST", headers, body });

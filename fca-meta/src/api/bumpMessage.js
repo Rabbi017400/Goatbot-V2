@@ -1,7 +1,7 @@
 "use strict";
 
 const { getType, generateOfflineThreadingID, toBigOrNumber } = require("../utils");
-const { sendMessageTask } = require("../tasks");
+const { sendMessageTask, THREAD_SOURCE, INITIATING_SOURCE } = require("../tasks");
 const { parsePublishResponse } = require("./decode");
 
 function extractMessage(response) {
@@ -47,9 +47,9 @@ async function bumpMessage(client, messageID, threadID) {
     attachmentFBIds: [],
     stickerId: 0,
     sendType: 1,
-    source: 0,
+    source: THREAD_SOURCE.MESSENGER_INBOX_IN_THREAD,
     hotEmojiSize: 0,
-    initiatingSource: 1,
+    initiatingSource: INITIATING_SOURCE.FACEBOOK_INBOX,
   });
   const response = await client.sendTasks([task]);
   const first = extractMessage(response);

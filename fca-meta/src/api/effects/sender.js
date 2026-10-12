@@ -1,7 +1,7 @@
 "use strict";
 
 const { generateOfflineThreadingID } = require("../../utils");
-const { sendMessageTask } = require("../../tasks");
+const { sendMessageTask, THREAD_SOURCE, INITIATING_SOURCE } = require("../../tasks");
 const { parsePublishResponse } = require("../decode");
 
 const SEND_MESSAGE_LABEL = "46";
@@ -39,10 +39,10 @@ function buildSendPayload(threadID, fields) {
     attachmentFBIds: fields.attachmentFBIds,
     stickerId: fields.stickerID,
     sendType: fields.sendType,
-    source: fields.source,
+    source: fields.source !== undefined ? fields.source : THREAD_SOURCE.MESSENGER_INBOX_IN_THREAD,
     hotEmojiSize: fields.hotEmojiSize,
     url: fields.url,
-    initiatingSource: fields.initiatingSource !== undefined ? fields.initiatingSource : 1,
+    initiatingSource: fields.initiatingSource !== undefined ? fields.initiatingSource : INITIATING_SOURCE.FACEBOOK_INBOX,
     powerUpStyle: fields.powerUpStyle,
   }).payload;
 }

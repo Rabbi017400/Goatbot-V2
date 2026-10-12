@@ -356,7 +356,7 @@ const { bumpMessage, bumpThread } = require("../src/api/bumpMessage");
 assert.strictEqual(typeof bumpMessage, "function");
 assert.strictEqual(typeof bumpThread, "function");
 
-const bumpTask = sendMessageTask(fakeClient2, { threadID: 42, otid: 1, text: "", replyToMessage: "mid.$x", replyType: 1, attachmentFBIds: [], stickerId: 0, sendType: 1, source: 0, hotEmojiSize: 0, initiatingSource: 1 });
+const bumpTask = sendMessageTask(fakeClient2, { threadID: 42, otid: 1, text: "", replyToMessage: "mid.$x", replyType: 1, attachmentFBIds: [], stickerId: 0, sendType: 1, source: 65537, hotEmojiSize: 0, initiatingSource: 1 });
 const bumpPayload = bumpTask.payload;
 assert.strictEqual(bumpPayload.reply_metadata.reply_source_id, "mid.$x");
 assert.strictEqual(bumpPayload.reply_metadata.reply_type, 1);
@@ -364,6 +364,37 @@ assert.ok(!("text" in bumpPayload), "bump must not carry text");
 
 const effectTask = sendMessageTask(fakeClient2, { threadID: 42, otid: 1, text: "hi", powerUpStyle: 4 });
 assert.strictEqual(effectTask.payload.power_up_style, 4);
+
+// --- Anti-suspension regression guards -----------------------------------
+// A real Messenger client always tags the message origin. Leaving source at 0
+// (UNKNOWN) was a per-message bot marker; it must default to MESSENGER_INBOX_IN_THREAD.
+const { THREAD_SOURCE, INITIATING_SOURCE, forwardMessageTask, typingTask } = require("../src/tasks");
+assert.strictEqual(THREAD_SOURCE.MESSENGER_INBOX_IN_THREAD, 65537);
+assert.strictEqual(INITIATING_SOURCE.FACEBOOK_INBOX, 1);
+assert.strictEqual(sendTaskNoReply.payload.source, 65537, "send must default to MESSENGER_INBOX_IN_THREAD");
+assert.strictEqual(sendMessageTask(fakeClient2, { threadID: 1, otid: 1, text: "x" }).payload.initiating_source, undefined, "initiating_source is caller-supplied");
+assert.strictEqual(forwardMessageTask(1, "o", "mid.$f").payload.source, 65537, "forwards must also carry the origin");
+assert.strictEqual(typingTask(1, true, false).payload.attribution, 0, "presence attribution stays 0, matching mautrix");
+
+const { removeSpecialChar } = require("../src/utils");
+assert.strictEqual(removeSpecialChar("a\uFE0Fb"), "a\uFE0Fb", "emoji variation selector must be preserved");
+assert.strictEqual(removeSpecialChar("\uFEFFhi"), "hi", "a leading BOM must be stripped");
+assert.strictEqual(removeSpecialChar("hi\u2764\uFE0F"), "hi\u2764\uFE0F", "heart with VS16 must survive intact");
+
+const { parseUserAgent: pua, buildClientHints: bch, buildDocumentHeaders } = require("../src/useragent");
+const mobileHints = bch(pua("Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.0.0 Mobile Safari/537.36"));
+assert.strictEqual(mobileHints["sec-ch-ua-mobile"], "?1", "a mobile UA must produce mobile client hints");
+assert.strictEqual(mobileHints["sec-ch-ua-platform"], '"Android"');
+assert.ok(mobileHints["sec-ch-ua"].includes("Google Chrome"), "hints must not claim a different browser than the UA");
+const docHeaders = buildDocumentHeaders("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36");
+assert.strictEqual(docHeaders["sec-ch-ua-mobile"], "?0");
+assert.strictEqual(docHeaders["user-agent"], "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36");
+
+const { chromeConnectOptions, CHROME_CIPHERS } = require("../src/tls");
+const tlsOpts = chromeConnectOptions();
+assert.deepStrictEqual(tlsOpts.ALPNProtocols, ["http/1.1"], "ALPN must be pinned to http/1.1 like a Chrome browser");
+assert.ok(CHROME_CIPHERS.includes("TLS_AES_128_GCM_SHA256"));
+assert.ok(!("GREASE" in tlsOpts));
 
 const effects = require("../src/api/effects");
 assert.strictEqual(effects.resolveEffect("love"), 1);
@@ -383,15 +414,6 @@ const { buildSendPayload } = require("../src/api/effects/sender");
 const fxPayload = buildSendPayload("7", { text: "boom", sendType: 1, powerUpStyle: 3 });
 assert.strictEqual(fxPayload.power_up_style, 3);
 assert.strictEqual(fxPayload.thread_id, "7");
-
-const { Safety, DEFAULT_SAFETY } = require("../src/safety");
-assert.strictEqual(DEFAULT_SAFETY.enabled, true, "safety on by default for account protection");
-const passive = new Safety({}, { enabled: false });
-assert.strictEqual(passive.enabled, false);
-assert.strictEqual(passive.jitterReconnect(1000), 1000);
-const active = new Safety({}, {});
-assert.strictEqual(active.enabled, true);
-assert.ok(active.jitterReconnect(1000) >= 1000);
 
 const { getAvatar, isAvatarEffect, resolveEffectTag: retag } = require("../src/api/effects/core");
 assert.strictEqual(getAvatar("angry").name, "anger");
@@ -423,28 +445,6 @@ assert.deepStrictEqual(
 assert.strictEqual(typeof editMessage, "function");
 
 (async () => {
-  const typingCalls = [];
-  const safetyClient = { sendStatelessTask: async (task) => typingCalls.push(task.payload) };
-  const gate = new Safety(safetyClient, { enabled: true, warmupMs: 0, minActionDelayMs: 0, maxActionDelayMs: 0, maxActionsPerWindow: 2, windowMs: 150, typing: true, typingMinMs: 1, typingMsPerChar: 1, typingMaxMs: 3 });
-  const start = Date.now();
-  await gate.acquire("9");
-  await gate.acquire("9");
-  await gate.acquire("9");
-  assert.ok(Date.now() - start >= 120, "third action must wait for the rate window");
-  assert.strictEqual(gate.stats().actions, 3);
-  assert.ok(gate.stats().rateLimited >= 1, "window wait must be recorded");
-  await gate.simulateTyping("9", "hello", false);
-  assert.strictEqual(typingCalls.length, 2, "typing on then off");
-  assert.strictEqual(typingCalls[0].is_typing, 1);
-  assert.strictEqual(typingCalls[1].is_typing, 0);
-
-  const breaker = new Safety({}, { enabled: true, circuitBreakerThreshold: 2, circuitBreakerCooldownMs: 50 });
-  breaker.noteResult({ message: "rate limit reached" });
-  breaker.noteResult({ message: "too many requests" });
-  assert.strictEqual(breaker.stats().breakerOpen, true, "breaker must open after threshold");
-  await breaker.acquire("1");
-  assert.strictEqual(breaker.stats().breakerOpen, false, "breaker must close after cooldown");
-
   const okEdit = await editMessage(editClient(["mid.$1", 0, "new text", 1]), "new text", "mid.$1");
   assert.deepStrictEqual(okEdit, { messageID: "mid.$1", body: "new text", editCount: 1 });
   await assert.rejects(() => editMessage(editClient(["mid.$1", 0, "old text", 1]), "new text", "mid.$1"), /too old or not from you/);
@@ -489,15 +489,6 @@ assert.strictEqual(typeof editMessage, "function");
   assert.strictEqual(parseRetryAfter({ get: () => null }), 0);
   assert.strictEqual(parseRetryAfter(null), 0);
   assert.ok(parseRetryAfter({ get: () => new Date(Date.now() + 5000).toUTCString() }) > 0);
-
-  const rateGated = new Safety({}, { enabled: true, minActionDelayMs: 0, warmupMs: 0, circuitBreakerCooldownMs: 80 });
-  rateGated.noteResult({ message: "server returned unexpected HTTP status 429", status: 429 });
-  assert.strictEqual(rateGated.stats().rateLimited, 1, "429 must count as rate limited");
-  const rateGated2 = new Safety({}, { enabled: true, minActionDelayMs: 0, warmupMs: 0, circuitBreakerCooldownMs: 80 });
-  rateGated2.noteRateLimit(0);
-  assert.strictEqual(rateGated2.stats().breakerOpen, true, "noteRateLimit must open the breaker");
-  await rateGated2.acquire("1");
-  assert.strictEqual(rateGated2.stats().breakerOpen, false, "breaker clears after backoff");
 
   const messageActions = require("../src/api/messageActions");
   const reactionCalls = [];
@@ -577,13 +568,72 @@ assert.strictEqual(typeof editMessage, "function");
 
   const { sendMessage: sendMessageFn } = require("../src/api/sendMessage");
   const sendCalls = [];
+  const typingCalls = [];
   const smClient = {
     getCurrentUserID: () => "5",
     sendTasks: async (tasks) => { sendCalls.push(tasks[0]); return { payload: JSON.stringify({ step: [] }), sp: [] }; },
-    safety: { enabled: false },
+    sendStatelessTask: async (task) => { typingCalls.push(task.payload); },
   };
   await sendMessageFn(smClient, { body: "hi", replyToMessage: "mid.$x" }, 42);
   assert.deepStrictEqual(sendCalls[0].payload.reply_metadata, { reply_source_id: "mid.$x", reply_source_type: 1, reply_type: 0 });
+  assert.strictEqual(sendCalls[0].payload.source, 65537, "a real send must carry the MESSENGER_INBOX_IN_THREAD origin");
+  assert.strictEqual(sendCalls[0].payload.initiating_source, 1, "a real send must carry the FACEBOOK_INBOX initiating source");
+  assert.strictEqual(typingCalls.length, 2, "a text send must show a typing indicator on then off");
+  assert.strictEqual(typingCalls[0].is_typing, 1);
+  assert.strictEqual(typingCalls[1].is_typing, 0);
+
+  const { postGraphqlBatch } = require("../src/api/http");
+  const gqlCalls = [];
+  const gqlClient = {
+    configs: { userId: "5", dtsg: "d", jazoest: "2", lsd: "LSD-TOKEN", siteData: {}, versionID: 1 },
+    graphQLRequests: 1,
+    getEndpoint: (n) => (n === "base_url" ? "https://www.facebook.com" : "https://www.facebook.com"),
+    http: {
+      buildHeaders: () => ({}),
+      request: async (url, opts) => { gqlCalls.push({ url, opts }); return { body: 'for (;;);{"o0":{"data":1}}\r\n{"error_results":0}' }; },
+    },
+  };
+  const batchData = await postGraphqlBatch(gqlClient, "https://www.facebook.com/api/graphqlbatch/", { batch_name: "MessengerGraphQLThreadFetcher", queries: "{}" });
+  assert.strictEqual(gqlCalls[0].opts.headers["x-fb-lsd"], "LSD-TOKEN", "batch GraphQL must send x-fb-lsd like the single-query path");
+  assert.strictEqual(gqlCalls[0].opts.headers["x-fb-friendly-name"], "MessengerGraphQLThreadFetcher");
+  assert.ok(Array.isArray(batchData), "batch response must parse into an array");
+
+  const { uploadAttachment } = require("../src/api/upload");
+  assert.strictEqual(typeof uploadAttachment, "function");
+
+  // autoMarkDelivery must send a delivery receipt for live messages.
+  // (require directly: the IIFE shadows EventEmitter/listenMqtt further down)
+  const _EventEmitter = require("events").EventEmitter;
+  const _listenMqtt = require("../src/listen").listenMqtt;
+  const deliverClient = new _EventEmitter();
+  deliverClient.connect = async () => { };
+  deliverClient.reset = async () => { };
+  deliverClient._messageThreadMap = new Map();
+  const deliverCalls = [];
+  deliverClient.configs = { userId: "5", dtsg: "d", jazoest: "2", siteData: {}, versionID: 1 };
+  deliverClient.graphQLRequests = 1;
+  deliverClient.getEndpoint = () => "https://www.facebook.com";
+  deliverClient.http = {
+    buildHeaders: () => ({}),
+    request: async (url, opts) => { deliverCalls.push({ url, opts }); return { body: "{}" }; },
+  };
+  deliverClient.sendTasks = async () => ({});
+  const deliverHandle = _listenMqtt(deliverClient, { processTable: (t) => t.events || [], absorb: () => { } }, () => { }, { replayGraceMs: 60000, autoMarkDelivery: true });
+  deliverClient.emit("ls-table", { events: [{ type: "message", messageID: "m-deliver", threadID: "77", timestamp: Date.now() }] });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(deliverCalls.some((c) => c.url.includes("delivery_receipts.php")), "autoMarkDelivery must send a delivery receipt");
+  deliverHandle.stopListening();
+
+  const { Client } = require("../src/client");
+  const autoOffClient = new Client({ appState: [{ key: "xs", value: "a" }, { key: "c_user", value: "1" }], autoReconnect: false, store: false });
+  autoOffClient._loggedIn = true;
+  autoOffClient._socketWasConnected = true;
+  autoOffClient._openSocket = async () => { throw new Error("boom"); };
+  autoOffClient._emitError = () => { };
+  let permanentErr = null;
+  autoOffClient.on("permanent-error", (e) => { permanentErr = e; });
+  await autoOffClient._runConnectionLoop();
+  assert.ok(permanentErr, "autoReconnect:false must stop reconnecting and surface the drop");
 
   const threadApi = require("../src/api/thread");
   const declineCalls = [];
@@ -626,6 +676,32 @@ assert.strictEqual(typeof editMessage, "function");
   assert.ok(delivered.some((e) => e.messageID === "live-2"), "messages delivered after ready must not be gated");
   handle.stopListening();
   assert.strictEqual(listenClient.listenerCount("ls-table"), 0, "stopListening must detach listeners");
+
+  // --- full/periodic reconnect (mautrix parity) ---------------------------
+  const reconnectClient = new Client({
+    cookies: cookiesFromAppState([{ key: "xs", value: "abc" }, { key: "c_user", value: "123" }]),
+    store: false,
+    forceRefreshIntervalMs: 50000,
+  });
+  reconnectClient._loggedIn = true;
+  reconnectClient.loadMessagesPage = async () => { reconnectClient.bootstrapCount = (reconnectClient.bootstrapCount || 0) + 1; return {}; };
+  reconnectClient.reset = async () => { reconnectClient.resetCount = (reconnectClient.resetCount || 0) + 1; };
+  reconnectClient.connect = async () => { reconnectClient.connectCount = (reconnectClient.connectCount || 0) + 1; return reconnectClient._connectPromise || Promise.resolve(); };
+  reconnectClient._schedulePeriodicReconnect();
+  assert.ok(reconnectClient._periodicReconnectTimer, "periodic reconnect timer must be armed after connect");
+  await reconnectClient.fullReconnect();
+  assert.strictEqual(reconnectClient.resetCount, 1, "fullReconnect must tear down the connection");
+  assert.strictEqual(reconnectClient.bootstrapCount, 1, "fullReconnect must re-run the bootstrap");
+  assert.strictEqual(reconnectClient.connectCount, 1, "fullReconnect must reconnect");
+  assert.strictEqual(reconnectClient.canReconnect(), false, "min full-reconnect interval must gate an immediate second full reconnect");
+  await reconnectClient.fullReconnect();
+  assert.strictEqual(reconnectClient.resetCount, 1, "a full reconnect within the min interval must be skipped");
+  reconnectClient._stopPeriodicReconnect();
+  reconnectClient.permanentErrored = true;
+  reconnectClient._lastFullReconnect = 0;
+  await reconnectClient.fullReconnect();
+  assert.strictEqual(reconnectClient.resetCount, 1, "a permanent error must stop full reconnects");
+  reconnectClient.disconnect();
 
   console.log("smoke: all assertions passed");
 })();

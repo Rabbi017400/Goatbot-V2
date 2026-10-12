@@ -292,6 +292,14 @@ class DgwSocket extends EventEmitter {
     return headers;
   }
 
+  _tlsOptions() {
+    try {
+      return require("../tls").chromeConnectOptions();
+    } catch (_) {
+      return {};
+    }
+  }
+
   connect() {
     return new Promise((resolve, reject) => {
       if (this.stopping) return resolve();
@@ -300,6 +308,7 @@ class DgwSocket extends EventEmitter {
         headers: this._getConnHeaders(),
         followRedirects: true,
       };
+      Object.assign(wsOptions, this._tlsOptions());
       if (this._agent) wsOptions.agent = this._agent;
       this.ws = new WebSocket(this._getConnURL(), wsOptions);
       this.ws.binaryType = "nodebuffer";

@@ -54,7 +54,7 @@ Regenerate both together; do not hand-edit generated output.
   effects, `listenMqtt` (real DGW event stream), thread list/info/history,
   send/edit/react/poll/typing/markAsRead/getUserInfo, cleanup, and
   logout+persist. Run `node tools/live-test.js`. It is safe/isolated: no
-  comments, minimal sends, safety on, and it cleans up after itself.
+  comments, minimal sends, and it cleans up after itself.
 - `sendMessage` before `listenMqtt` works: `Client.sendTasks` lazily starts
   the socket via `_ensureConnectStarted()`. Do not remove that call.
 - Send-message ids come back through `LSReplaceOptimsiticMessage` in the
@@ -171,45 +171,46 @@ silently succeeding. On success it returns `{ messageID, body, editCount }`.
 An earlier stub sent the task and discarded the response, so a rejected/too-old
 edit looked successful. That is fixed; edits are covered in `test/smoke.js`.
 
-## Account safety layer (`src/safety.js`)
+## Wire parity with mautrix-meta (no extra behaviour)
 
-Behavioral protection. **Enabled by default** with gentle, human-like pacing so
-new deployments do not trip behavioral detection; set `safety: { enabled: false }`
-for byte-exact legacy timing. It changes no wire protocol. Configure at login or
-later:
+The library intentionally adds nothing on top of what the reference Go client
+(`mautrix-meta`) does. There is **no** safety/throttling layer, no reconnect
+jitter, no periodic token refresh and no keep-alive tasks: all of those were
+removed because they are automation tells that the reference client does not
+send. Payloads, sync, reconnect backoff and shutdown match mautrix-meta.
 
-```js
-login({ appState }, { safety: { enabled: true, typing: true } });
-// or
-api.setOptions({ safety: { enabled: false } }); // opt out
-api.setSafety({ maxActionsPerWindow: 15 }); // partial update, returns merged options
-api.getSafety(); // stats: actions, waits, rateLimited, breakerTrips, typing, breakerOpen
-```
+- The only human-like signal left is a typing indicator: `api.sendMessage`
+  sends `sendTypingIndicator(threadID, true)` before a text send, waits a
+  length-proportional (capped) delay, then sends `false`, then the message. It
+  uses `sendStatelessTask`, so it never consumes or blocks the message queue and
+  a typing failure never breaks the send. Set `options.typingIndicator: false`
+  to skip it.
+- Reconnect uses mautrix-meta's exact backoff: 1s doubling to a 5-minute cap,
+  reset to immediate after a connection that lasted more than 2 minutes.
+- Socket sync does a single pass over databases 1/2/95/104 (no retry loop);
+  a failed sync surfaces as a connection error, matching mautrix.
 
-Options (defaults):
+## Full / periodic reconnect (`Client.fullReconnect`)
 
-- `enabled: true` — master switch.
-- `warmupMs: 2000` — delay before the first outgoing action after enabling/login.
-- `minActionDelayMs: 300`, `maxActionDelayMs: 900` — randomized gap between
-  outgoing sends, so bursts never go out back-to-back.
-- `windowMs: 60000`, `maxActionsPerWindow: 40` — rolling per-session cap.
-- `maxBurstPerThreadPerWindow: 20` — optional per-thread cap (0 = off).
-- `typing: false`, `typingMsPerChar: 45`, `typingMinMs: 350`, `typingMaxMs: 5000`
-  — when on, `sendMessage` fires a `sendTypingIndicator` "on", waits a
-  length-proportional (capped) delay, then "off" before the real send. The cap
-  keeps messages from feeling slow; typing is best-effort and never breaks a send.
-- `reconnectJitter: 0.3` — randomizes reconnect backoff so reconnects aren't a
-  fixed machine-like cadence.
-- `circuitBreakerThreshold: 5`, `circuitBreakerCooldownMs: 120000` — after this
-  many consecutive rate-limit-looking errors, outgoing actions pause for the
-  cooldown instead of retry-storming.
-- HTTP `429`s are treated as rate limits: `HTTPClient.request` honors
-  `Retry-After` for its own backoff (capped) and fires `onRateLimit`, which opens
-  the safety breaker so other outgoing actions stop instead of piling on.
+Long-lived sessions keep their bootstrap config (`fb_dtsg`, LSD token, version
+id) and sync cursors forever, which mautrix-meta treats as a logout risk. It
+therefore force-reconnects on a timer and this client mirrors that:
 
-Gating lives in `Client.sendTasks` (all label-3 sends pass through
-`safety.acquire`), and typing in `api/sendMessage`. Stateless tasks (typing,
-presence) are intentionally **not** gated so they don't consume the action budget.
+- `Client.connect()` arms `_schedulePeriodicReconnect()`, exactly where mautrix
+  starts `go m.periodicReconnect()`. The timer fires `fullReconnect()` after
+  `options.forceRefreshIntervalMs` (default 20h, `ForceRefreshIntervalSeconds`);
+  set it to `0` to disable.
+- `fullReconnect()` is mautrix `MetaClient.FullReconnect`: it clears
+  `socketWasSynced`, tears the connection down (`reset()`), re-runs
+  `loadMessagesPage()` for fresh tokens and reconnects. It is gated by
+  `canReconnect()` / `options.minFullReconnectMs` (default 1h,
+  `MinFullReconnectIntervalSeconds`) so overlapping refreshes cannot thrash.
+- A permanent error (websocket close 4003, or any drop when
+  `options.autoReconnect === false`) sets `permanentErrored`, which stops the
+  force-refresh loop. `api.fullReconnect()` / `api.canReconnect()` expose it.
+- `disconnect()` and `reset()` clear the timer so a stopped client never
+  reconnects itself. The timer is `unref()`d, so it never keeps the process
+  alive on its own.
 
 ## Session persistence (`src/sessionStore.js`)
 
@@ -300,12 +301,8 @@ without a new server API.
 - `api.sendMessage(msg, threadID, callback, replyToMessage, isGroup)` arg order
   matches legacy exactly; `replyToMessage` maps to `ReplySourceId` and the bot
   gets `type: "message_reply"` with `event.messageReply`.
-- Safety defaults (`src/safety.js`): enabled, warmup 3s, 400-1200ms pacing,
-  25 actions/min, 12/thread/min, typing on, presence on, 5 failures then a
-  120s circuit breaker. `uploadAttachment` bypasses safety; typing uses
-  `sendStatelessTask` so it does not consume the action budget.
-- `options.safety` is passed straight through `login`/`setOptions`, so Goat-Bot
-  toggles the guard from `config.json -> optionsFca.safety` (see `setSafety`).
+- `api.sendMessage` emits a typing indicator before a text send via
+  `sendStatelessTask`; it never consumes or blocks the message queue.
 - Never write live cookies into the tracked (committed empty) `account.txt`;
   test appstate lives in gitignored `tools/.tmp-account.json`.
 
@@ -368,7 +365,7 @@ without a new server API.
   (repeated sends are a spam signal).
 - `shortcut` and `translate` are admin-gated (`role: 2`).
 
-## Account safety / anti-suspension invariants (Goat-Bot-V2 side)
+## Anti-suspension invariants (Goat-Bot-V2 side)
 
 - `bot/login/checkLiveCookie.js` must never use the deprecated `mbasic`
   subdomain; it probes `https://www.facebook.com/` and treats missing essential

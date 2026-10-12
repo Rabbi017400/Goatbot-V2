@@ -85,6 +85,32 @@ function buildClientHints(profile) {
   };
 }
 
+// Full document-navigation header set for a given UA. Used by the cookie-liveness
+// probe and the email/password login flow so their fingerprint matches the
+// Lightspeed session instead of a different (hardcoded) browser.
+function buildDocumentHeaders(userAgent) {
+  const ua = userAgent || USER_AGENT;
+  const hints = buildClientHints(parseUserAgent(ua));
+  return {
+    "user-agent": ua,
+    accept:
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "accept-language": "en-US,en;q=0.9",
+    "sec-ch-prefers-color-scheme": hints["sec-ch-prefers-color-scheme"],
+    "sec-ch-ua": hints["sec-ch-ua"],
+    "sec-ch-ua-full-version-list": hints["sec-ch-ua-full-version-list"],
+    "sec-ch-ua-mobile": hints["sec-ch-ua-mobile"],
+    "sec-ch-ua-model": hints["sec-ch-ua-model"],
+    "sec-ch-ua-platform": hints["sec-ch-ua-platform"],
+    "sec-ch-ua-platform-version": hints["sec-ch-ua-platform-version"],
+    "sec-fetch-dest": "document",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-site": "none",
+    "sec-fetch-user": "?1",
+    "upgrade-insecure-requests": "1",
+  };
+}
+
 module.exports = {
   DPR,
   BROWSER_NAME,
@@ -104,5 +130,6 @@ module.exports = {
   FB_APP_ID,
   parseUserAgent,
   buildClientHints,
+  buildDocumentHeaders,
   chromeHintProfile,
 };

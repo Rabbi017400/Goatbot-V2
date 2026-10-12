@@ -9,6 +9,7 @@ const {
 } = require("./useragent");
 const { delay } = require("./utils");
 const { parseLossless } = require("./bigjson");
+const { buildDispatcher } = require("./tls");
 
 const ANTI_JS_PREFIX = Buffer.from("for (;;);");
 const MAX_RETRIES = 5;
@@ -97,10 +98,8 @@ class HTTPClient {
   updateProxy(proxy) {
     this.proxy = proxy;
     this.dispatcher = null;
-    if (!proxy) return;
     try {
-      const { ProxyAgent } = require("undici");
-      this.dispatcher = new ProxyAgent(proxy);
+      this.dispatcher = buildDispatcher({ proxy });
     } catch (_) {
       this.dispatcher = null;
     }
@@ -134,6 +133,10 @@ class HTTPClient {
       headers["upgrade-insecure-requests"] = "1";
     } else {
       headers["x-asbd-id"] = ASBD_ID;
+      // A real Messenger web client sends the LSD token on every non-document
+      // request (GraphQL, Mercury, task sends); mautrix-meta does the same.
+      const lsd = this.configs && this.configs.lsd;
+      if (lsd) headers["x-fb-lsd"] = lsd;
       headers["sec-fetch-dest"] = "empty";
       headers["sec-fetch-mode"] = "cors";
       headers["sec-fetch-site"] = "same-origin";

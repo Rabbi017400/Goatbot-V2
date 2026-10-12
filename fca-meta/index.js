@@ -58,13 +58,14 @@ const DEFAULT_OPTIONS = {
   autoReconnect: true,
   online: false,
   emitReady: false,
-  safety: undefined,
+  typingIndicator: true,
+  forceRefreshIntervalMs: undefined,
+  minFullReconnectMs: undefined,
 };
 
 function buildApi(client, globalOptions) {
   const formatter = new EventFormatter(client, globalOptions);
   client.formatter = formatter;
-  if (globalOptions.safety) client.safety.update(globalOptions.safety);
   const api = {};
 
   api.getCurrentUserID = () => client.getCurrentUserID();
@@ -82,7 +83,6 @@ function buildApi(client, globalOptions) {
       client.http.setUserAgent(options.userAgent);
       client.persistSession(false);
     }
-    if (options.safety !== undefined) client.safety.update(options.safety);
     formatter.selfListen = globalOptions.selfListen !== false;
     formatter.selfListenEvent = Boolean(globalOptions.selfListenEvent);
     formatter.listenEvents = globalOptions.listenEvents !== false;
@@ -101,7 +101,7 @@ function buildApi(client, globalOptions) {
         return cb({ error: "Pass a threadID as a second argument." });
       }
     }
-    const promise = sendMessageApi.sendMessage(client, msg, threadID, { replyToMessage, isGroup });
+    const promise = sendMessageApi.sendMessage(client, msg, threadID, { replyToMessage, isGroup, typingIndicator: globalOptions.typingIndicator !== false });
     if (callback) promise.then((d) => callback(null, d), (e) => callback(e));
     return promise;
   };
@@ -180,13 +180,6 @@ function buildApi(client, globalOptions) {
     listAvatarEffects: api.listAvatarEffects,
     isAvatarSupported: api.isAvatarSupported,
   };
-  api.setSafety = (options) => {
-    const updated = client.safety.update(options);
-    globalOptions.safety = Object.assign({}, globalOptions.safety, updated);
-    return updated;
-  };
-  api.getSafety = () => client.safety.stats();
-  api.safety = client.safety;
   api.createPoll = withCallback((threadID, question, options) => messageActions.createPoll(client, threadID, question, options));
 
   // --- Threads ------------------------------------------------------------
@@ -337,14 +330,17 @@ function buildApi(client, globalOptions) {
   api.listenMqtt = (callback) => {
     const handle = listenMqtt(client, formatter, callback, {
       emitReady: globalOptions.emitReady === true,
-      refreshIntervalMs: globalOptions.refreshFb_dtsgIntervalMs,
       replayGraceMs: globalOptions.replayGraceMs,
+      autoMarkDelivery: globalOptions.autoMarkDelivery === true,
+      autoMarkRead: globalOptions.autoMarkRead === true,
     });
     api.stopListening = (cb) => handle.stopListening(cb);
     api.stopListeningAsync = () => handle.stopListeningAsync();
     return handle;
   };
   api.forceReconnect = () => client.forceReconnect();
+  api.fullReconnect = () => client.fullReconnect();
+  api.canReconnect = () => client.canReconnect();
 
   api.stopListening = () => {};
   api.stopListeningAsync = () => Promise.resolve();
@@ -389,8 +385,10 @@ async function login(credentials, options, callback) {
       userAgent: options.userAgent,
       proxy: options.proxy,
       host: options.host,
-      safety: options.safety,
       store: options.store,
+      autoReconnect: options.autoReconnect,
+      forceRefreshIntervalMs: options.forceRefreshIntervalMs,
+      minFullReconnectMs: options.minFullReconnectMs,
     });
     await client.loadMessagesPage();
     if (!client.isLoggedIn) throw errors.tokenInvalidated;

@@ -1,7 +1,7 @@
 "use strict";
 
 const fs = require("fs");
-const { getType, streamToBuffer, toBigOrNumber } = require("../utils");
+const { getType, streamToBuffer, toBigOrNumber, delay } = require("../utils");
 const { uploadAttachment } = require("./upload");
 const {
   EFFECTS,
@@ -16,6 +16,8 @@ const {
   isAvatarSupported,
 } = require("./effects/core");
 const { SEND_TYPE, extractMessageID, buildSendPayload, buildSendTask } = require("./effects/sender");
+
+const AVATAR_COOLDOWN_MS = 3000;
 
 function parseMessage(message) {
   if (typeof message === "string") return { body: message, replyToMessageID: undefined };
@@ -66,6 +68,14 @@ async function sendAvatarEffect(client, name, message, threadID) {
     throw new Error("unknown avatar effect \"" + name + "\"");
   }
   if (threadID === undefined || threadID === null || threadID === "") throw new Error("sendAvatarEffect: threadID is required");
+  // An avatar GIF must be re-uploaded on every send, so back-to-back calls are a
+  // burst of uploads. Space them out per session.
+  const now = Date.now();
+  const since = now - (client._lastAvatarSendAt || 0);
+  if (client._lastAvatarSendAt && since < AVATAR_COOLDOWN_MS) {
+    await delay(AVATAR_COOLDOWN_MS - since);
+  }
+  client._lastAvatarSendAt = Date.now();
   const avatar = getAvatar(name) || randomAvatar();
   if (!avatar) throw new Error("no avatar effects are available");
   const file = avatarPath(avatar);

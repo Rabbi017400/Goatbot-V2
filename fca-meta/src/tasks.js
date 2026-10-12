@@ -2,6 +2,20 @@
 
 const { generateEpochID, generateTimestampString, stringifyBigInt } = require("./utils");
 
+// Where a message is sent from. A real Messenger client always tags the origin
+// (MESSENGER_INBOX_IN_THREAD); leaving it UNKNOWN (0) is a per-message bot marker
+// that Meta flags. Values match mautrix-meta table.ThreadSourceType.
+const THREAD_SOURCE = {
+  UNKNOWN: 0,
+  MESSENGER_INBOX: 65536,
+  MESSENGER_INBOX_IN_THREAD: 65537,
+};
+
+// table.InitiatingSource. FACEBOOK_INBOX is what the web client sends.
+const INITIATING_SOURCE = {
+  FACEBOOK_INBOX: 1,
+};
+
 const TASK_LABELS = {
   UpdatePresence: "3",
   ThreadMarkRead: "21",
@@ -75,7 +89,7 @@ function sendMessageTask(client, { threadID, otid, text, replyToMessage, replyTy
   const payload = {
     thread_id: threadID,
     otid: String(otid),
-    source: source !== undefined ? source : 0,
+    source: source !== undefined ? source : THREAD_SOURCE.MESSENGER_INBOX_IN_THREAD,
     send_type: sendType !== undefined ? sendType : 1,
     sync_group: 1,
   };
@@ -485,7 +499,7 @@ function forwardMessageTask(threadID, otid, forwardedMsgId) {
     payload: {
       thread_id: threadID,
       otid: otid,
-      source: 0,
+      source: THREAD_SOURCE.MESSENGER_INBOX_IN_THREAD,
       send_type: 5,
       sync_group: 1,
       forwarded_msg_id: forwardedMsgId,
@@ -499,6 +513,8 @@ function forwardMessageTask(threadID, otid, forwardedMsgId) {
 
 module.exports = {
   TASK_LABELS,
+  THREAD_SOURCE,
+  INITIATING_SOURCE,
   TaskManager,
   sendMessageTask,
   markReadTask,
