@@ -1,7 +1,7 @@
 module.exports = {
 	config: {
 		name: "music",
-		aliases: ["sticker", "msticker"],
+		aliases: ["ms", "msticker"],
 		version: "1.0",
 		author: "Neoaz 🐊",
 		countDown: 5,
