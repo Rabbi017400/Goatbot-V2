@@ -504,6 +504,26 @@ assert.strictEqual(typeof editMessage, "function");
     _getMessageThread: () => "",
     _getMessageTimestamp: () => 0,
   };
+  // searchMusic must not swallow a logged-out envelope as an empty result set:
+  // `{"data":{},"error":1357001}` has no picker container and previously came
+  // back as [] (surfacing to commands as "No song matched").
+  const { searchMusic } = require("../src/api/music");
+  const musicClient = (response) => ({
+    makeGraphQLRequest: async () => response,
+    musicTokensStale: () => false,
+    refreshMusicSession: async () => false,
+  });
+  await assert.rejects(
+    () => searchMusic(musicClient({ data: {}, error: 1357001 }), "it's you", { exact: false }),
+    /session expired or not logged in/
+  );
+  const emptyContainer = await searchMusic(
+    musicClient({ data: { xfb_music_picker_connection_container: { items: { edges: [] } } } }),
+    "zzxqwkjhgfdsa",
+    { exact: false }
+  );
+  assert.strictEqual(emptyContainer.length, 0, "a real no-match keeps the container and returns []");
+
   await messageActions.setMessageReaction(reactionClient, "\u2764", "mid.$a");
   assert.strictEqual(reactionCalls[0].payload.thread_key, undefined, "thread_key must be omitted when unknown");
   assert.strictEqual(reactionCalls[0].payload.reaction_style, null);

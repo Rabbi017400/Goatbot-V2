@@ -222,8 +222,13 @@ function checkAndTrimString(string) {
 	return string;
 }
 
+// Keep the full cookie set. Trimming appState to a hardcoded allowlist dropped
+// cookies the Lightspeed session relies on (and rewrote account.txt without
+// them), so a freshly exported appState was degraded on the first startup.
 function filterKeysAppState(appState) {
-	return appState.filter(item => ["c_user", "xs", "datr", "fr", "sb", "i_user"].includes(item.key));
+	if (!Array.isArray(appState))
+		return appState;
+	return appState.filter(item => item && item.key && item.value !== undefined && item.value !== null && item.key !== "x-referer");
 }
 
 global.responseUptimeCurrent = responseUptimeSuccess;

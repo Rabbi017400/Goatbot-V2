@@ -183,6 +183,15 @@ async function searchMusic(client, query, options = {}) {
     err.res = response;
     throw err;
   }
+  // A logged-out or invalid session returns an envelope with no picker
+  // container at all (e.g. `{"data":{},"error":1357001}`), which would
+  // otherwise be indistinguishable from a genuine no-match and surface to the
+  // caller as "no song matched". A real search always carries the container.
+  if (!(response.data && response.data.xfb_music_picker_connection_container)) {
+    const err = new Error("searchMusic: session expired or not logged in (no results container)");
+    err.res = response;
+    throw err;
+  }
   const { edges, pageInfo } = extractEdges(response);
   const ranked = rankResults(query, edges, options);
   const results = ranked.slice(0, limit);
