@@ -583,7 +583,10 @@ assert.strictEqual(typeof editMessage, "function");
   assert.deepStrictEqual(sendCalls[0].payload.reply_metadata, { reply_source_id: "mid.$x", reply_source_type: 1, reply_type: 0 });
   assert.strictEqual(sendCalls[0].payload.source, 65537, "a real send must carry the MESSENGER_INBOX_IN_THREAD origin");
   assert.strictEqual(sendCalls[0].payload.initiating_source, 1, "a real send must carry the FACEBOOK_INBOX initiating source");
-  assert.strictEqual(typingCalls.length, 2, "a text send must show a typing indicator on then off");
+  assert.strictEqual(typingCalls.length, 0, "a text send must NOT emit a typing indicator by default, matching mautrix-meta");
+
+  await sendMessageFn(smClient, { body: "hi again" }, 42, { typingIndicator: true });
+  assert.strictEqual(typingCalls.length, 2, "opting in with typingIndicator:true must show typing on then off");
   assert.strictEqual(typingCalls[0].is_typing, 1);
   assert.strictEqual(typingCalls[1].is_typing, 0);
 
@@ -602,6 +605,27 @@ assert.strictEqual(typeof editMessage, "function");
   assert.strictEqual(gqlCalls[0].opts.headers["x-fb-lsd"], "LSD-TOKEN", "batch GraphQL must send x-fb-lsd like the single-query path");
   assert.strictEqual(gqlCalls[0].opts.headers["x-fb-friendly-name"], "MessengerGraphQLThreadFetcher");
   assert.ok(Array.isArray(batchData), "batch response must parse into an array");
+
+  const { checkResponse } = require("../src/api/http");
+  const staleErrClient = { configs: {}, onStaleSession: (e) => { staleErrClient.seen = e; } };
+  const notLoggedIn = (() => { try { checkResponse(staleErrClient, Buffer.from('for (;;);{"error":1357001}')); } catch (e) { return e; } })();
+  assert.strictEqual(notLoggedIn.error, "Not logged in.");
+  assert.strictEqual(notLoggedIn.errorCode, 1357001);
+  assert.strictEqual(staleErrClient.seen.errorCode, 1357001, "error 1357001 must notify the stale-session handler");
+  const reloadErr = (() => { try { checkResponse(staleErrClient, Buffer.from('for (;;);{"error":1357004}')); } catch (e) { return e; } })();
+  assert.strictEqual(reloadErr.error, "Please reload the page.");
+  assert.strictEqual(reloadErr.errorCode, 1357004, "error 1357004 (please reload) must be recognised");
+  assert.strictEqual(staleErrClient.seen.errorCode, 1357004, "error 1357004 must notify the stale-session handler");
+  const noLsdClient = {
+    configs: { userId: "5", dtsg: "d", jazoest: "2", siteData: {}, versionID: 1 },
+    graphQLRequests: 1,
+    getEndpoint: () => "https://www.facebook.com",
+    http: { buildHeaders: () => ({}), request: async () => ({ body: 'for (;;);{"o0":{"data":1}}\r\n{"error_results":0}' }) },
+  };
+  let capturedHeaders;
+  noLsdClient.http.request = async (url, opts) => { capturedHeaders = opts.headers; return { body: 'for (;;);{"o0":{"data":1}}\r\n{"error_results":0}' }; };
+  await postGraphqlBatch(noLsdClient, "https://www.facebook.com/api/graphqlbatch/", { batch_name: "x", queries: "{}" });
+  assert.ok(!("x-fb-lsd" in capturedHeaders), "x-fb-lsd must be omitted entirely when no token is known");
 
   const { uploadAttachment } = require("../src/api/upload");
   assert.strictEqual(typeof uploadAttachment, "function");
@@ -706,6 +730,23 @@ assert.strictEqual(typeof editMessage, "function");
   await reconnectClient.fullReconnect();
   assert.strictEqual(reconnectClient.resetCount, 1, "a permanent error must stop full reconnects");
   reconnectClient.disconnect();
+
+  // A stale bootstrap (error 1357001/1357004) must trigger exactly one full
+  // reconnect, mirroring mautrix-meta's ErrPleaseReloadPage handling.
+  {
+    const staleClient = new Client({ cookies: cookiesFromAppState([{ key: "xs", value: "abc" }, { key: "c_user", value: "123" }]) });
+    staleClient._loggedIn = true;
+    staleClient._lastFullReconnect = 0;
+    staleClient.loadMessagesPage = async () => ({});
+    staleClient.reset = async () => { staleClient.resetCount = (staleClient.resetCount || 0) + 1; };
+    staleClient.connect = async () => { staleClient.connectCount = (staleClient.connectCount || 0) + 1; return staleClient._connectPromise || Promise.resolve(); };
+    staleClient.onStaleSession();
+    staleClient.onStaleSession();
+    await new Promise((resolve) => setTimeout(resolve, 1700));
+    assert.strictEqual(staleClient.resetCount, 1, "a burst of stale-session signals must trigger one reconnect");
+    assert.strictEqual(staleClient.connectCount, 1, "the stale-session reconnect must reconnect once");
+    staleClient.disconnect();
+  }
 
   // --- HTTP client dispatcher compatibility -------------------------------
   // The client must send its undici@6 dispatcher through undici's own fetch.

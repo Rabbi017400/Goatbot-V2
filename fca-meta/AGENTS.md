@@ -201,14 +201,20 @@ jitter, no periodic token refresh and no keep-alive tasks: all of those were
 removed because they are automation tells that the reference client does not
 send. Payloads, sync, reconnect backoff and shutdown match mautrix-meta.
 
-- The only human-like signal left is a typing indicator: `api.sendMessage`
-  sends `sendTypingIndicator(threadID, true)` before a text send, waits a
-  length-proportional (capped) delay, then sends `false`, then the message. It
-  uses `sendStatelessTask`, so it never consumes or blocks the message queue and
-  a typing failure never breaks the send. Set `options.typingIndicator: false`
-  to skip it.
+- `api.sendMessage` sends no typing indicator before a text send by default
+  (the reference client sends none). Opt in with `options.typingIndicator: true`;
+  it then sends `sendTypingIndicator(threadID, true)`, waits a
+  length-proportional (capped) delay, sends `false`, then the message. It uses
+  `sendStatelessTask`, so it never consumes or blocks the message queue and a
+  typing failure never breaks the send.
 - Reconnect uses mautrix-meta's exact backoff: 1s doubling to a 5-minute cap,
   reset to immediate after a connection that lasted more than 2 minutes.
+- A request answered with Lightspeed error `1357001` (token invalidated) or
+  `1357004` (please reload page) calls `checkResponse`'s
+  `client.onStaleSession(err)`, which debounces and then does one
+  `fullReconnect()` (or `refreshTokens()` when `canReconnect()` is false) so the
+  stale bootstrap page is re-read instead of every later request failing. This
+  mirrors mautrix-meta's `ErrTokenInvalidated` / `ErrPleaseReloadPage` handlers.
 - Socket sync does a single pass over databases 1/2/95/104 (no retry loop);
   a failed sync surfaces as a connection error, matching mautrix.
 
@@ -310,8 +316,9 @@ without a new server API.
 - `api.sendMessage(msg, threadID, callback, replyToMessage, isGroup)` arg order
   matches legacy exactly; `replyToMessage` maps to `ReplySourceId` and the bot
   gets `type: "message_reply"` with `event.messageReply`.
-- `api.sendMessage` emits a typing indicator before a text send via
-  `sendStatelessTask`; it never consumes or blocks the message queue.
+- `api.sendMessage` sends no typing indicator before a text send (opt in with
+  `options.typingIndicator: true`); when enabled it uses `sendStatelessTask`, so
+  it never consumes or blocks the message queue.
 - Never write live cookies into the tracked (committed empty) `account.txt`;
   test appstate lives in gitignored `tools/.tmp-account.json`.
 

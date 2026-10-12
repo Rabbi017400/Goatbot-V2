@@ -83,10 +83,10 @@ async function sendMessage(client, msg, threadID, options = {}) {
   }
 
   const otid = generateOfflineThreadingID();
-  // Show a typing indicator before a text send, like a real client composing the
-  // message. Presence is stateless (not queued with the message) so it does not
-  // interfere with the send task.
-  if (options.typingIndicator !== false && typeof body === "string" && body) {
+  // The reference client (mautrix-meta) sends no typing/presence signal before a
+  // text send; the composing indicator is an extra unsolicited event, so it is
+  // only emitted when the caller explicitly opts in with `typingIndicator: true`.
+  if (options.typingIndicator === true && typeof body === "string" && body) {
     let isGroup = options.isGroup;
     if (isGroup === undefined && client.formatter && typeof client.formatter.getThreadMeta === "function") {
       const meta = client.formatter.getThreadMeta(targetThread);

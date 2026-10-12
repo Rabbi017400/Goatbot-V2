@@ -43,7 +43,22 @@ function checkResponse(client, body) {
   if (json && json.error === 1357001) {
     const err = new Error("Not logged in.");
     err.error = "Not logged in.";
+    err.errorCode = 1357001;
     err.res = json;
+    // mautrix-meta treats ErrTokenInvalidated as "full reconnect and retry"
+    // rather than just surfacing the error, so a long-lived bot recovers its
+    // session instead of failing every subsequent request.
+    if (typeof client.onStaleSession === "function") client.onStaleSession(err);
+    throw err;
+  }
+  if (json && json.error === 1357004) {
+    // mautrix-meta ErrPleaseReloadPage: the cached bootstrap page (dtsg/lsd) is
+    // stale; a full reconnect re-reads it rather than failing forever.
+    const err = new Error("Please reload the page.");
+    err.error = "Please reload the page.";
+    err.errorCode = 1357004;
+    err.res = json;
+    if (typeof client.onStaleSession === "function") client.onStaleSession(err);
     throw err;
   }
   if (json && json.error && json.error !== 0) {
@@ -94,7 +109,10 @@ async function postGraphqlBatch(client, url, form) {
   const body = new URLSearchParams(buildForm(client, form)).toString();
   const headers = client.http.buildHeaders({ withCookies: true });
   headers["content-type"] = "application/x-www-form-urlencoded";
-  headers["x-fb-lsd"] = (client.configs && client.configs.lsd) || "";
+  // Only send x-fb-lsd when a token is known; mautrix-meta omits the header
+  // entirely instead of sending it empty.
+  const lsd = client.configs && client.configs.lsd;
+  if (lsd) headers["x-fb-lsd"] = lsd;
   headers["x-fb-friendly-name"] = form && (form.fb_api_req_friendly_name || form.batch_name || form.__friendlyName) || "";
   headers["origin"] = client.getEndpoint("base_url");
   headers["referer"] = client.getEndpoint("base_url") + "/";

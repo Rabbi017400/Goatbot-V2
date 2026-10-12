@@ -58,7 +58,11 @@ const DEFAULT_OPTIONS = {
   autoReconnect: true,
   online: false,
   emitReady: false,
-  typingIndicator: true,
+  // mautrix-meta (the reference client) never sends a typing indicator before a
+  // text send. fca-meta mirrors that: the pre-send typing/presence pair is an
+  // extra, unsolicited signal that the reference client does not emit, so it is
+  // off unless a caller explicitly opts in with `typingIndicator: true`.
+  typingIndicator: false,
   forceRefreshIntervalMs: undefined,
   minFullReconnectMs: undefined,
 };
@@ -100,7 +104,7 @@ function buildApi(client, globalOptions) {
         return cb({ error: "Pass a threadID as a second argument." });
       }
     }
-    const promise = sendMessageApi.sendMessage(client, msg, threadID, { replyToMessage, isGroup, typingIndicator: globalOptions.typingIndicator !== false });
+    const promise = sendMessageApi.sendMessage(client, msg, threadID, { replyToMessage, isGroup, typingIndicator: globalOptions.typingIndicator === true });
     if (callback) promise.then((d) => callback(null, d), (e) => callback(e));
     return promise;
   };

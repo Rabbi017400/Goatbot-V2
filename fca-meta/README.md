@@ -41,8 +41,14 @@ login({ appState: require("./appstate.json") }, (err, api) => {
 - `sec-ch-ua` client hints are derived from the active user agent, so the
   fingerprint never disagrees with itself.
 - Wire behaviour matches the reference client (mautrix-meta) with nothing added
-  on top: no throttling layer, no reconnect jitter and no keep-alive tasks. The
-  only human-like signal is a typing indicator sent before a text message.
+  on top: no throttling layer, no reconnect jitter and no keep-alive tasks. No
+  typing indicator is sent before a text message either; opt in with
+  `options.typingIndicator: true` only if a caller really wants the (extra,
+  unsolicited) composing signal.
+- A stale bootstrap session is recovered the way mautrix-meta does: a request
+  answered with error `1357001` (token invalidated) or `1357004` (please reload
+  page) triggers one debounced full reconnect that re-reads the bootstrap page,
+  so a long-running bot re-authenticates instead of failing every later request.
 - The connection is force-refreshed on a timer like mautrix-meta's
   `periodicReconnect`: every 20h (configurable with `forceRefreshIntervalMs`,
   `0` to disable) the client re-runs the bootstrap and reconnects, so the

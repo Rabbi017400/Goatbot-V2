@@ -66,6 +66,7 @@ class Client extends EventEmitter {
     this._firstConnectSettled = false;
     this._lastFullReconnect = 0;
     this._periodicReconnectTimer = null;
+    this._staleReconnectPending = false;
     this.permanentErrored = false;
   }
 
@@ -602,6 +603,28 @@ class Client extends EventEmitter {
 
   _emitError(err) {
     if (this.listenerCount("error") > 0) this.emit("error", err);
+  }
+
+  // Called when a request reveals the cached bootstrap session (fb_dtsg/lsd) is
+  // stale: Meta answers with error 1357001 (token invalidated) or 1357004
+  // (please reload page). mautrix-meta reacts to both with a full reconnect that
+  // re-reads the bootstrap page, so the session recovers instead of every later
+  // request failing. Debounced so a burst of stale responses triggers one
+  // reconnect, and gated by canReconnect() so it cannot thrash.
+  onStaleSession() {
+    if (this.permanentErrored || this._stopping || !this._loggedIn) return;
+    if (this._staleReconnectPending) return;
+    this._staleReconnectPending = true;
+    const timer = setTimeout(() => {
+      this._staleReconnectPending = false;
+      if (this._stopping || this.permanentErrored) return;
+      if (this.canReconnect()) {
+        this.fullReconnect().catch((e) => this._emitError(e));
+      } else {
+        this.refreshTokens().catch(() => {});
+      }
+    }, 1500);
+    if (timer.unref) timer.unref();
   }
 
   async _openSocket() {
