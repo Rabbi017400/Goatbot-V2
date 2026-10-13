@@ -748,6 +748,40 @@ assert.strictEqual(typeof editMessage, "function");
     staleClient.disconnect();
   }
 
+  // connect() must resolve once the socket is up ("ready"), not only when the
+  // socket closes. Previously _openSocket awaited the socket close, so a
+  // healthy session left connect() (and therefore fullReconnect(), used by the
+  // stale-session upload recovery) pending forever.
+  {
+    const { Client } = require("../src/client");
+    const liveClient = new Client({ cookies: cookiesFromAppState([{ key: "xs", value: "abc" }, { key: "c_user", value: "123" }]) });
+    liveClient._loggedIn = true;
+    // A healthy socket: settle the first connect, then stay open (never return).
+    liveClient._runConnectionLoop = async () => {
+      liveClient._settleFirstConnect();
+      await new Promise(() => { });
+    };
+    const settled = await Promise.race([
+      liveClient.connect().then(() => "resolved", () => "rejected"),
+      new Promise((resolve) => setTimeout(() => resolve("hung"), 500)),
+    ]);
+    assert.strictEqual(settled, "resolved", "connect() must resolve while the socket is still open");
+    liveClient.disconnect();
+
+    const failClient = new Client({ cookies: cookiesFromAppState([{ key: "xs", value: "abc" }, { key: "c_user", value: "123" }]) });
+    failClient._loggedIn = true;
+    failClient._runConnectionLoop = async () => {
+      failClient._settleFirstConnect(new Error("boom"));
+      await new Promise(() => { });
+    };
+    const failed = await Promise.race([
+      failClient.connect().then(() => "resolved", () => "rejected"),
+      new Promise((resolve) => setTimeout(() => resolve("hung"), 500)),
+    ]);
+    assert.strictEqual(failed, "rejected", "_settleFirstConnect(err) must reject connect()");
+    failClient.disconnect();
+  }
+
   // --- HTTP client dispatcher compatibility -------------------------------
   // The client must send its undici@6 dispatcher through undici's own fetch.
   // Node's built-in fetch ships a newer undici whose Handler rejects the Agent
@@ -763,6 +797,273 @@ assert.strictEqual(typeof editMessage, "function");
     const res = await client.request(`http://127.0.0.1:${port}/`);
     assert.strictEqual(res.status, 200, "request with a dispatcher must succeed");
     assert.strictEqual(res.body.toString(), "ok");
+    await new Promise((resolve) => server.close(resolve));
+  }
+
+  // --- cookie rotation (mautrix Cookies.UpdateFromResponse parity) --------
+  // Meta rotates short-lived cookies (`fr`, `sb`) mid-session. A long-lived
+  // client that ignores Set-Cookie keeps sending stale values, which is one of
+  // the signals that gets an account logged out. The jar must apply rotation.
+  {
+    const { Cookies, parseSetCookie } = require("../src/cookies");
+    const parsed = parseSetCookie("fr=abc123; expires=Wed, 01 Jan 2031 00:00:00 GMT; path=/; secure; httponly");
+    assert.strictEqual(parsed.name, "fr");
+    assert.strictEqual(parsed.value, "abc123");
+    assert.ok(parsed.expires > Date.now(), "a future Expires must be parsed");
+
+    const jar = new Cookies({ xs: "old", c_user: "123", fr: "stale", sb: "old-sb" });
+    jar.updateFromResponse([
+      "fr=new-fr; expires=Wed, 01 Jan 2031 00:00:00 GMT",
+      "sb=new-sb; max-age=3600",
+    ]);
+    assert.strictEqual(jar.get("fr"), "new-fr", "a rotated cookie must replace the stale value");
+    assert.strictEqual(jar.get("sb"), "new-sb", "a new cookie must be added to the jar");
+    assert.strictEqual(jar.get("xs"), "old", "unrelated cookies must be preserved");
+
+    jar.updateFromResponse(["fr=; max-age=0"]);
+    assert.strictEqual(jar.has("fr"), false, "max-age=0 must delete the cookie");
+    jar.updateFromResponse(["sb=deleted; expires=Thu, 01 Jan 1970 00:00:00 GMT"]);
+    assert.strictEqual(jar.has("sb"), false, "an epoch Expires must delete the cookie");
+    // Facebook clears the session as `xs=deleted; expires=<epoch>` (non-empty
+    // value), so the deletion check must not require an empty value.
+    jar.updateFromResponse(["xs=deleted; expires=Thu, 01 Jan 1970 00:00:00 GMT"]);
+    assert.strictEqual(jar.isLoggedIn(), false, "deleting xs must mark the jar as logged out");
+    assert.strictEqual(parseSetCookie("xs=deleted; expires=Thu, 01 Jan 1970 00:00:00 GMT").deleted, true, "a non-empty xs deletion must be detected");
+  }
+
+  // The rotation must happen over the wire, for every response.
+  {
+    const httpMod = require("http");
+    const { HTTPClient } = require("../src/http");
+    const server = httpMod.createServer((req, res) => {
+      res.setHeader("Set-Cookie", ["fr=rotated-fr; Path=/; Max-Age=3600", "sb=rotated-sb; Path=/"]);
+      res.writeHead(200);
+      res.end("ok");
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+    const jar = cookiesFromAppState([{ key: "xs", value: "abc" }, { key: "c_user", value: "123" }, { key: "fr", value: "stale" }]);
+    const client = new HTTPClient({ cookies: jar });
+    await client.request(`http://127.0.0.1:${port}/`);
+    assert.strictEqual(jar.get("fr"), "rotated-fr", "Set-Cookie from a response must update the live jar");
+    assert.strictEqual(jar.get("sb"), "rotated-sb", "new cookies from a response must be added");
+    await new Promise((resolve) => server.close(resolve));
+  }
+
+  // Rotation must be applied even on a redirect hop (a 302 can carry a rotated
+  // cookie), and must happen before the redirect is classified.
+  {
+    const httpMod = require("http");
+    const { HTTPClient } = require("../src/http");
+    const server = httpMod.createServer((req, res) => {
+      if (req.url === "/start") {
+        res.setHeader("Set-Cookie", ["fr=rotated-on-redirect; Path=/; Max-Age=3600"]);
+        res.writeHead(302, { Location: "/next" });
+        res.end();
+        return;
+      }
+      res.writeHead(200);
+      res.end("ok");
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+    const jar = cookiesFromAppState([{ key: "xs", value: "abc" }, { key: "c_user", value: "123" }, { key: "fr", value: "stale" }]);
+    const client = new HTTPClient({ cookies: jar });
+    // manual redirect: request() returns the 302 without following it.
+    const res = await client.request(`http://127.0.0.1:${port}/start`);
+    assert.strictEqual(res.status, 302, "the redirect response must be returned");
+    assert.strictEqual(jar.get("fr"), "rotated-on-redirect", "a Set-Cookie on a redirect hop must still update the jar");
+    await new Promise((resolve) => server.close(resolve));
+  }
+
+  // getAppState must expose the rotated cookies so Goat-Bot-V2 persists them.
+  {
+    const { Client } = require("../src/client");
+    const rotClient = new Client({ cookies: cookiesFromAppState([{ key: "xs", value: "abc" }, { key: "c_user", value: "123" }, { key: "fr", value: "stale" }]) });
+    rotClient.cookies.updateFromResponse(["fr=fresh; Max-Age=3600"]);
+    const state = rotClient.getAppState();
+    const fr = state.find((c) => c.key === "fr");
+    assert.ok(fr && fr.value === "fresh", "getAppState must expose the rotated cookie value");
+  }
+
+  // --- upload stale-session recovery (mautrix parity) ---------------------
+  // Text sends ride the socket and keep working while the cached fb_dtsg/lsd go
+  // stale; uploads carry the stale lsd and are the first thing to break. A
+  // 1357004 must trigger a recovery and a retry instead of failing forever.
+  {
+    const { uploadAttachment } = require("../src/api/upload");
+    const responses = [
+      { body: Buffer.from('for (;;);{"error":1357004}') },
+      { body: Buffer.from(JSON.stringify({ payload: { metadata: { "0": { image_id: "999" } } } })) },
+    ];
+    let i = 0;
+    const uploadClient = {
+      configs: { userId: "5", dtsg: "d", jazoest: "2", siteData: {}, versionID: 1 },
+      graphQLRequests: 1,
+      newHTTPQuery: () => ({}),
+      getEndpoint: (n) => ({
+        base_url: "https://www.facebook.com",
+        media_upload: "https://www.facebook.com/ajax/mercury/upload.php?",
+        thread: "https://www.facebook.com/messages/t/",
+      }[n] || "https://www.facebook.com"),
+      http: { buildHeaders: () => ({}), request: async () => responses[Math.min(i++, responses.length - 1)] },
+      refreshStaleSession: async () => { uploadClient.refreshed = (uploadClient.refreshed || 0) + 1; },
+    };
+    const meta = await uploadAttachment(uploadClient, Buffer.from("data"), "42");
+    assert.strictEqual(meta.image_id, "999", "a stale-session upload must recover and return metadata");
+    assert.strictEqual(uploadClient.refreshed, 1, "a 1357004 upload must trigger one stale-session recovery");
+  }
+
+  // mautrix parseMercuryResponse: a consent redirect is permanent and must not
+  // be retried, and a successful upload returns the metadata directly.
+  {
+    const { uploadAttachment } = require("../src/api/upload");
+    let uploads = 0;
+    const consentClient = {
+      configs: { userId: "5", dtsg: "d", jazoest: "2", siteData: {}, versionID: 1 },
+      graphQLRequests: 1,
+      newHTTPQuery: () => ({}),
+      getEndpoint: (n) => ({
+        base_url: "https://www.facebook.com",
+        media_upload: "https://www.facebook.com/ajax/mercury/upload.php?",
+        thread: "https://www.facebook.com/messages/t/",
+      }[n] || "https://www.facebook.com"),
+      http: {
+        buildHeaders: () => ({}),
+        request: async () => {
+          uploads++;
+          return { body: Buffer.from('for (;;);{"redirect":"/consent/?next=x"}') };
+        },
+      },
+      refreshStaleSession: async () => { consentClient.refreshed = (consentClient.refreshed || 0) + 1; },
+    };
+    let consentErr = null;
+    try {
+      await uploadAttachment(consentClient, Buffer.from("data"), "42");
+    } catch (e) {
+      consentErr = e;
+    }
+    assert.ok(consentErr && consentErr.consentRequired, "a consent redirect must be a permanent upload error");
+    assert.strictEqual(uploads, 1, "a consent redirect must not be retried");
+    assert.strictEqual(consentClient.refreshed, undefined, "a consent redirect must not trigger a stale recovery");
+  }
+
+  // A successful first-attempt upload returns metadata without any recovery.
+  {
+    const { uploadAttachment } = require("../src/api/upload");
+    const okClient = {
+      configs: { userId: "5", dtsg: "d", jazoest: "2", siteData: {}, versionID: 1 },
+      graphQLRequests: 1,
+      newHTTPQuery: () => ({}),
+      getEndpoint: (n) => ({
+        base_url: "https://www.facebook.com",
+        media_upload: "https://www.facebook.com/ajax/mercury/upload.php?",
+        thread: "https://www.facebook.com/messages/t/",
+      }[n] || "https://www.facebook.com"),
+      http: {
+        buildHeaders: () => ({}),
+        request: async () => ({ body: Buffer.from(JSON.stringify({ payload: { metadata: [{ image_id: "111" }] } })) }),
+      },
+      refreshStaleSession: async () => { okClient.refreshed = true; },
+    };
+    const meta = await uploadAttachment(okClient, Buffer.from("data"), "42");
+    assert.strictEqual(meta.image_id, "111", "a clean upload must return metadata");
+    assert.strictEqual(okClient.refreshed, undefined, "a clean upload must not trigger a recovery");
+  }
+
+  // A stale HTTP POST (checkResponse path) must retry after recovery.
+  {
+    const { httpPost } = require("../src/api/http");
+    let calls = 0;
+    const postClient = {
+      configs: { userId: "5", dtsg: "d", jazoest: "2", siteData: {}, versionID: 1 },
+      graphQLRequests: 1,
+      getEndpoint: () => "https://www.facebook.com",
+      http: {
+        buildHeaders: () => ({}),
+        request: async () => {
+          calls++;
+          if (calls === 1) return { body: 'for (;;);{"error":1357004}' };
+          return { body: 'for (;;);{"ok":1}' };
+        },
+      },
+      refreshStaleSession: async () => { postClient.refreshed = (postClient.refreshed || 0) + 1; },
+    };
+    const out = await httpPost(postClient, "https://www.facebook.com/ajax/mercury/delivery_receipts.php", {});
+    assert.strictEqual(out.ok, 1, "a stale HTTP POST must retry after recovery");
+    assert.strictEqual(postClient.refreshed, 1, "a stale HTTP POST must trigger one recovery");
+  }
+
+  // stripAntiJS must unwrap the `for (;;);` prefix from strings as well as
+  // Buffers, and a redirect to /login.php must be a permanent (token-invalid)
+  // error that is not retried, matching mautrix ErrTokenInvalidatedRedirect.
+  {
+    const { stripAntiJS, isPermanentError, RedirectedError, errors } = require("../src/http");
+    assert.strictEqual(stripAntiJS('for (;;);{"ok":1}'), '{"ok":1}', "stripAntiJS must unwrap string bodies");
+    assert.ok(isPermanentError(new RedirectedError(errors.tokenInvalidated, "https://www.facebook.com/login.php")), "a login.php redirect must be permanent");
+    assert.ok(isPermanentError(errors.challengeRequired), "a challenge redirect must be permanent");
+    assert.ok(!isPermanentError(new Error("random")), "an ordinary error must stay retryable");
+  }
+
+  // --- deauth / unauthorized (mautrix DgwSocket parity) --------------------
+  // mautrix fails the socket with ErrUnauthorized when it receives a deauth
+  // frame, which the connector surfaces as a permanent logout. fca-meta marks
+  // the socket deauthed so the close is reported as 4003 and the connection
+  // loop stops reconnecting.
+  {
+    const deauthSocket = new DgwSocket({
+      getCookies: () => "xs=abc",
+      origin: "https://www.facebook.com",
+      wsURL: "wss://gateway.facebook.com/ws/lightspeed",
+      appID: "123",
+      userID: "456",
+    });
+    let closedErr = null;
+    deauthSocket.on("close", (e) => { closedErr = e; });
+    deauthSocket._handleFrame({ type: frames.FRAME_TYPE.DEAUTH });
+    assert.strictEqual(deauthSocket.deauthed, true, "a deauth frame must mark the socket deauthed");
+    assert.ok(closedErr && closedErr.closeCode === 4003, "a deauth frame must surface as a 4003 close");
+  }
+
+  // --- end-to-end: rotation + stale recovery + persistence ----------------
+  // A server that rotates cookies and then answers a GraphQL batch with a stale
+  // token error must (a) rotate the jar, (b) drive one stale-session recovery,
+  // and (c) let getAppState expose the rotated value so the bot can persist it.
+  {
+    const httpMod = require("http");
+    const { HTTPClient } = require("../src/http");
+    const { Client } = require("../src/client");
+    let requests = 0;
+    const server = httpMod.createServer((req, res) => {
+      requests++;
+      res.setHeader("Set-Cookie", ["fr=rotated-" + requests + "; Path=/; Max-Age=3600"]);
+      if (requests === 1) {
+        res.writeHead(200);
+        res.end('for (;;);{"error":1357004}');
+        return;
+      }
+      res.writeHead(200);
+      res.end('for (;;);{"o0":{"data":1}}\r\n{"error_results":0}');
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+    const base = `http://127.0.0.1:${port}`;
+
+    const e2eClient = new Client({ cookies: cookiesFromAppState([{ key: "xs", value: "abc" }, { key: "c_user", value: "123" }, { key: "fr", value: "stale" }]) });
+    e2eClient._loggedIn = true;
+    e2eClient.configs = { userId: "123", dtsg: "d", jazoest: "2", lsd: "LSD", siteData: {}, versionID: 1 };
+    e2eClient.http = new HTTPClient({ cookies: e2eClient.cookies, userAgent: e2eClient.userAgent });
+    e2eClient.getEndpoint = () => base;
+    e2eClient.refreshStaleSession = async () => { e2eClient.recoveries = (e2eClient.recoveries || 0) + 1; };
+
+    const { postGraphqlBatch } = require("../src/api/http");
+    const batch = await postGraphqlBatch(e2eClient, base + "/api/graphqlbatch/", { batch_name: "x", queries: "{}" });
+    assert.ok(Array.isArray(batch), "the retried batch must parse into an array");
+    assert.strictEqual(e2eClient.recoveries, 1, "the stale batch must trigger exactly one recovery");
+    assert.strictEqual(e2eClient.cookies.get("fr"), "rotated-2", "the rotated cookie from the retried request must be applied");
+    const persisted = e2eClient.getAppState().find((c) => c.key === "fr");
+    assert.ok(persisted && persisted.value === "rotated-2", "getAppState must expose the rotated cookie for persistence");
+
     await new Promise((resolve) => server.close(resolve));
   }
 

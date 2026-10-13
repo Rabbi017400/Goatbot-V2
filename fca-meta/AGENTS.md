@@ -217,6 +217,10 @@ send. Payloads, sync, reconnect backoff and shutdown match mautrix-meta.
   mirrors mautrix-meta's `ErrTokenInvalidated` / `ErrPleaseReloadPage` handlers.
 - Socket sync does a single pass over databases 1/2/95/104 (no retry loop);
   a failed sync surfaces as a connection error, matching mautrix.
+- A DGW **deauth** frame (mautrix `DeauthFrame` -> `ErrUnauthorized`) marks the
+  socket deauthed and surfaces the close as code `4003`, so the connection loop
+  marks the client `permanentErrored` and stops reconnecting instead of looping
+  on a revoked session. `_emitCloseOnce` guarantees a single `close` event.
 
 ## Full / periodic reconnect (`Client.fullReconnect`)
 
@@ -240,23 +244,61 @@ therefore force-reconnects on a timer and this client mirrors that:
   reconnects itself. The timer is `unref()`d, so it never keeps the process
   alive on its own.
 
-## Session persistence (removed)
+## Session persistence (removed) and cookie rotation (kept)
 
 fca-meta does **not** back up or reuse cookies from disk. Each login uses exactly
 the appState it was given (`account.txt`), so a redeploy always starts from the
 current committed session. There is no `sessionStore`, no `options.store`, and no
 `api.persistSession()` / `api.getDeviceID()`.
 
-- Cookie-rotation handling is removed entirely: `Cookies.updateFromResponse`,
-  `Client._onCookieRotation` and `src/sessionStore.js` are gone, along with
-  `options.store`. `Set-Cookie` responses are ignored; the in-memory jar keeps
-  the appState values.
+- Cookie **rotation** is kept and mirrors mautrix-meta's
+  `Cookies.UpdateFromResponse`: every HTTP response's `Set-Cookie` is applied to
+  the live in-memory jar (`Cookies.updateFromResponse`, called from
+  `HTTPClient.requestOnce`). Meta rotates short-lived cookies (`fr`, `sb`)
+  mid-session, and a client that keeps sending stale values is one of the signals
+  that gets an account logged out after ~10-12h. A cookie is deleted when the
+  server sends `Max-Age<=0` or a past `Expires`. `api.getAppState()` exposes the
+  rotated values, and Goat-Bot-V2's `autoRefreshFbstate` persists them back to
+  `account.txt`, so the rotation survives a restart. There is still no disk
+  backup of the session itself and no `Client._onCookieRotation` hook.
 - The bootstrap `MqttWebDeviceID.clientID` is used as-is (a fresh one only when
   absent); there is no persisted device id to override it.
 - `api.logout()` just disconnects now that there is nothing to clear.
 
 Use a stable residential/mobile proxy per account — a datacenter IP alone can
 still get a fresh session flagged.
+
+## Stale bootstrap recovery (uploads, GraphQL, Mercury)
+
+The socket stays up on the Lightspeed protocol, but the cached bootstrap tokens
+(`fb_dtsg`/`lsd`) go stale long before the socket drops. Text sends ride the
+socket and keep working, while HTTP-based calls (media uploads, GraphQL, Mercury)
+carry the stale `lsd` and are rejected with error `1357001` (token invalidated)
+or `1357004` (please reload page). This is exactly the reported symptom: "text
+works but no upload works". fca-meta mirrors mautrix-meta's recovery:
+
+- `checkResponse` (`src/api/http.js`) detects `1357001`/`1357004` and calls
+  `client.onStaleSession`, which debounces and runs one
+  `client.refreshStaleSession()` — a `fullReconnect()` (re-reads the bootstrap
+  page) when `canReconnect()` allows, else a `refreshTokens()`.
+- `refreshStaleSession()` is **awaitable** and shares one in-flight recovery
+  across concurrent callers, so a burst of stale responses cannot start several
+  reconnects. `onStaleSession` cancels its debounced timer if an awaited
+  recovery begins.
+- `uploadAttachment` (`src/api/upload.js`) mirrors mautrix
+  `SendMercuryUploadRequest`: it rebuilds the query URL on every attempt (so a
+  retry after recovery carries the fresh tokens), retries up to 4 times on a
+  parse failure, and on `1357001`/`1357004` awaits `refreshStaleSession()` then
+  retries. `httpGet`/`httpPost`/`httpPostFormData`/`postGraphqlBatch` wrap their
+  request in `withStaleRetry` (recovery + one retry), mirroring mautrix's
+  "reconnect then retry the upload" in `handlematrix.go`.
+- `HTTPClient` treats a redirect to `/login.php` as `tokenInvalidated`
+  (mautrix `ErrTokenInvalidatedRedirect`) and no longer retries
+  challenge/checkpoint/consent/suspended redirects (`isPermanentError` unwraps
+  `RedirectedError`).
+- `stripAntiJS` trims the `for (;;);` prefix from string bodies too (not just
+  `Buffer`), so `checkResponse`/`uploadAttachment` parse correctly regardless of
+  how the body arrives.
 
 ## Effects (text power-ups and avatar effects)
 

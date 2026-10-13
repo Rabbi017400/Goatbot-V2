@@ -71,57 +71,100 @@ function checkResponse(client, body) {
 }
 
 async function httpGet(client, url, form, options = {}) {
-  const query = buildForm(client, form);
-  const qs = new URLSearchParams(query).toString();
-  const target = qs ? url + (url.includes("?") ? "&" : "?") + qs : url;
-  const headers = client.http.buildHeaders({ withCookies: true });
-  Object.assign(headers, options.customHeader || {});
-  const res = await client.http.request(target, { method: "GET", headers });
-  return checkResponse(client, res.body);
+  return withStaleRetry(client, options, async () => {
+    const query = buildForm(client, form);
+    const qs = new URLSearchParams(query).toString();
+    const target = qs ? url + (url.includes("?") ? "&" : "?") + qs : url;
+    const headers = client.http.buildHeaders({ withCookies: true });
+    Object.assign(headers, options.customHeader || {});
+    const res = await client.http.request(target, { method: "GET", headers });
+    return checkResponse(client, res.body);
+  });
 }
 
 async function httpPost(client, url, form, options = {}) {
-  const body = new URLSearchParams(buildForm(client, form)).toString();
-  const headers = client.http.buildHeaders({ withCookies: true });
-  headers["content-type"] = "application/x-www-form-urlencoded";
-  headers["origin"] = client.getEndpoint("base_url");
-  headers["referer"] = client.getEndpoint("base_url") + "/";
-  Object.assign(headers, options.customHeader || {});
-  const res = await client.http.request(url, { method: "POST", headers, body });
-  return checkResponse(client, res.body);
+  return withStaleRetry(client, options, async () => {
+    const body = new URLSearchParams(buildForm(client, form)).toString();
+    const headers = client.http.buildHeaders({ withCookies: true });
+    headers["content-type"] = "application/x-www-form-urlencoded";
+    headers["origin"] = client.getEndpoint("base_url");
+    headers["referer"] = client.getEndpoint("base_url") + "/";
+    Object.assign(headers, options.customHeader || {});
+    const res = await client.http.request(url, { method: "POST", headers, body });
+    return checkResponse(client, res.body);
+  });
 }
 
 async function httpPostFormData(client, url, form, options = {}) {
-  const fd = new FormData();
-  for (const key of Object.keys(form || {})) {
-    if (form[key] === undefined || form[key] === null) continue;
-    fd.append(key, form[key]);
-  }
-  const headers = client.http.buildHeaders({ withCookies: true });
-  headers["origin"] = client.getEndpoint("base_url");
-  Object.assign(headers, options.customHeader || {});
-  const res = await client.http.request(url, { method: "POST", headers, body: fd });
-  return checkResponse(client, res.body);
+  return withStaleRetry(client, options, async () => {
+    const fd = new FormData();
+    for (const key of Object.keys(form || {})) {
+      if (form[key] === undefined || form[key] === null) continue;
+      fd.append(key, form[key]);
+    }
+    const headers = client.http.buildHeaders({ withCookies: true });
+    headers["origin"] = client.getEndpoint("base_url");
+    Object.assign(headers, options.customHeader || {});
+    const res = await client.http.request(url, { method: "POST", headers, body: fd });
+    return checkResponse(client, res.body);
+  });
 }
 
 // POST to a GraphQL batch endpoint and return the concatenated JSON array.
 async function postGraphqlBatch(client, url, form) {
-  const body = new URLSearchParams(buildForm(client, form)).toString();
-  const headers = client.http.buildHeaders({ withCookies: true });
-  headers["content-type"] = "application/x-www-form-urlencoded";
-  // Only send x-fb-lsd when a token is known; mautrix-meta omits the header
-  // entirely instead of sending it empty.
-  const lsd = client.configs && client.configs.lsd;
-  if (lsd) headers["x-fb-lsd"] = lsd;
-  headers["x-fb-friendly-name"] = form && (form.fb_api_req_friendly_name || form.batch_name || form.__friendlyName) || "";
-  headers["origin"] = client.getEndpoint("base_url");
-  headers["referer"] = client.getEndpoint("base_url") + "/";
-  const res = await client.http.request(url, { method: "POST", headers, body });
-  const parsed = parseBatchJSON(res.body);
-  if (parsed === null) {
-    throw new Error("postGraphqlBatch: failed to parse response");
+  return withStaleRetry(client, {}, async () => {
+    const body = new URLSearchParams(buildForm(client, form)).toString();
+    const headers = client.http.buildHeaders({ withCookies: true });
+    headers["content-type"] = "application/x-www-form-urlencoded";
+    // Only send x-fb-lsd when a token is known; mautrix-meta omits the header
+    // entirely instead of sending it empty.
+    const lsd = client.configs && client.configs.lsd;
+    if (lsd) headers["x-fb-lsd"] = lsd;
+    headers["x-fb-friendly-name"] = form && (form.fb_api_req_friendly_name || form.batch_name || form.__friendlyName) || "";
+    headers["origin"] = client.getEndpoint("base_url");
+    headers["referer"] = client.getEndpoint("base_url") + "/";
+    const res = await client.http.request(url, { method: "POST", headers, body });
+    const parsed = parseBatchJSON(res.body);
+    if (parsed === null) {
+      throw new Error("postGraphqlBatch: failed to parse response");
+    }
+    checkBatchStale(client, parsed);
+    return parsed;
+  });
+}
+
+// mautrix-meta inspects the LS response ErrorCode and treats 1357001/1357004 as
+// a stale bootstrap (refresh + retry). Batch GraphQL responses carry the same
+// code as a top-level `error` field, which must drive the same recovery rather
+// than being returned to callers as a successful (but empty) result.
+function checkBatchStale(client, parsed) {
+  const items = Array.isArray(parsed) ? parsed : [parsed];
+  for (const item of items) {
+    if (!item || typeof item !== "object") continue;
+    const code = item.error !== undefined ? item.error : item.errorCode;
+    if (code !== 1357001 && code !== 1357004) continue;
+    const err = new Error(code === 1357004 ? "Please reload the page." : "Not logged in.");
+    err.error = code;
+    err.errorCode = code;
+    err.res = item;
+    throw err;
   }
-  return parsed;
+}
+
+// mautrix-meta retries a request once the stale bootstrap (fb_dtsg/lsd) has been
+// refreshed (error 1357001/1357004 -> refresh -> retry). A long-lived bot hits
+// this on GraphQL/Mercury calls well before the socket drops, so recover here
+// instead of surfacing "not logged in" to every caller.
+async function withStaleRetry(client, options, fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    const code = err && (err.errorCode || (err.res && err.res.error));
+    if (options.retryOnStale === false || (code !== 1357001 && code !== 1357004)) throw err;
+    if (typeof client.refreshStaleSession === "function") await client.refreshStaleSession().catch(() => {});
+    else if (typeof client.onStaleSession === "function") client.onStaleSession(err);
+    return fn();
+  }
 }
 
 module.exports = { httpGet, httpPost, httpPostFormData, postGraphqlBatch, buildForm, checkResponse };

@@ -257,6 +257,9 @@ class DgwSocket extends EventEmitter {
     this.nextStreamID = 0;
     this.stopping = false;
     this.connected = false;
+    this.deauthed = false;
+    this._closeEmitted = false;
+    this._closeError = null;
     this.lastPong = 0;
     this.pingTimer = null;
     this.pongTimer = null;
@@ -340,19 +343,36 @@ class DgwSocket extends EventEmitter {
         }
       });
       this.ws.on("close", (code) => {
-        this.connected = false;
-        this._stopTimers();
-        const err = new Error("dgw: socket closed (code " + code + ")");
-        err.closeCode = code;
-        for (const stream of this.streams.values()) stream.onClose(false);
-        this.streams.clear();
+        // A deauth frame means the session was revoked; report it as an
+        // unauthorized (4003) close so the caller stops reconnecting.
+        this._emitCloseOnce(this.deauthed ? 4003 : code);
         if (!settled) {
           settled = true;
-          reject(err);
+          reject(this._closeError);
         }
-        this.emit("close", err);
       });
     });
+  }
+
+  // Emit "close" exactly once, whether the underlying websocket closed or a
+  // deauth frame revoked the session. The code is the websocket close code, or
+  // 4003 for a deauth (mautrix maps deauth to ErrUnauthorized).
+  _emitCloseOnce(code) {
+    if (this._closeEmitted) return;
+    this._closeEmitted = true;
+    this.connected = false;
+    this._stopTimers();
+    const err = new Error("dgw: socket closed (code " + code + ")");
+    err.closeCode = code;
+    this._closeError = err;
+    for (const stream of this.streams.values()) stream.onClose(false);
+    this.streams.clear();
+    this.emit("close", err);
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch (_) { /* ignore */ }
+    }
   }
 
   _startTimers() {
@@ -433,7 +453,12 @@ class DgwSocket extends EventEmitter {
       case FRAME_TYPE.DRAIN:
         break;
       case FRAME_TYPE.DEAUTH:
+        // mautrix treats a deauth frame as an unauthorized (logged-out) socket
+        // and fails the connection. Surface it as a 4003 close so the connection
+        // loop marks the client permanently errored instead of reconnecting.
+        this.deauthed = true;
         this.emit("deauth");
+        this._emitCloseOnce(4003);
         break;
       default:
         break;

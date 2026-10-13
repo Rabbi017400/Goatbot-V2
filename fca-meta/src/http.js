@@ -10,6 +10,7 @@ const {
 const { delay } = require("./utils");
 const { parseLossless } = require("./bigjson");
 const { buildDispatcher } = require("./tls");
+const { parseSetCookie } = require("./cookies");
 
 // Use undici's own fetch rather than the runtime global. The dispatcher built
 // in ./tls is an undici@6 Agent; Node's bundled fetch ships a different (newer)
@@ -39,7 +40,13 @@ const errors = {
 };
 
 function stripAntiJS(body) {
-  if (Buffer.isBuffer(body) && body.length >= ANTI_JS_PREFIX.length && body.slice(0, ANTI_JS_PREFIX.length).equals(ANTI_JS_PREFIX)) {
+  if (Buffer.isBuffer(body)) {
+    if (body.length >= ANTI_JS_PREFIX.length && body.slice(0, ANTI_JS_PREFIX.length).equals(ANTI_JS_PREFIX)) {
+      return body.slice(ANTI_JS_PREFIX.length);
+    }
+    return body;
+  }
+  if (typeof body === "string" && body.startsWith(ANTI_JS_PREFIX.toString())) {
     return body.slice(ANTI_JS_PREFIX.length);
   }
   return body;
@@ -54,6 +61,7 @@ function accountVerificationPath(pathname) {
 }
 
 function isPermanentError(err) {
+  if (err instanceof RedirectedError) err = err.type;
   return (
     err === errors.tokenInvalidated ||
     err === errors.challengeRequired ||
@@ -138,7 +146,6 @@ class HTTPClient {
       headers["sec-fetch-user"] = "?1";
       headers["upgrade-insecure-requests"] = "1";
     } else {
-      headers["x-asbd-id"] = ASBD_ID;
       // A real Messenger web client sends the LSD token on every non-document
       // request (GraphQL, Mercury, task sends); mautrix-meta does the same.
       const lsd = this.configs && this.configs.lsd;
@@ -153,6 +160,9 @@ class HTTPClient {
       if (cookieStr) headers["cookie"] = cookieStr;
       const [w] = this.cookies.getViewports();
       headers["viewport-width"] = w;
+      // mautrix sends x-asbd-id on every request that carries cookies, the
+      // document bootstrap page included.
+      headers["x-asbd-id"] = ASBD_ID;
     }
     if (extra) Object.assign(headers, extra);
     return headers;
@@ -190,6 +200,14 @@ class HTTPClient {
       redirect,
     });
 
+    // Apply any cookie rotation the server sent back to the live jar (mautrix
+    // Cookies.UpdateFromResponse) before acting on redirects, so a rotated
+    // `fr`/`sb` on a 302 hop is picked up too and the jar reflects reality for
+    // the deleted-cookie check below.
+    if (this.cookies && typeof this.cookies.updateFromResponse === "function") {
+      this.cookies.updateFromResponse(resHeaders);
+    }
+
     const location = resHeaders.get("location");
     if (location) {
       const locationURL = new URL(location, url);
@@ -202,12 +220,20 @@ class HTTPClient {
       if (locationURL.pathname === "/consent/" || locationURL.pathname.startsWith("/privacy/consent/")) {
         throw new RedirectedError(errors.consentRequired, locationURL.toString());
       }
+      // mautrix-meta treats a redirect to /login.php as a token-invalidated
+      // signal (ErrTokenInvalidatedRedirect): the session was rejected and the
+      // server is bouncing the client to the login page.
+      if (locationURL.pathname === "/login.php") {
+        throw new RedirectedError(errors.tokenInvalidated, locationURL.toString());
+      }
     }
 
+    // mautrix treats a deleted `xs`/`sessionid` as a token-invalidated session.
+    // Detect it after the rotation has been applied so the jar reflects reality.
     const setCookies = resHeaders.getSetCookie ? resHeaders.getSetCookie() : [];
     for (const raw of setCookies) {
-      const name = raw.split("=")[0].trim();
-      if ((name === "xs" || name === "sessionid") && /max-age=0|expires=Thu, 01 Jan 1970/i.test(raw)) {
+      const parsed = parseSetCookie(raw);
+      if (parsed && (parsed.name === "xs" || parsed.name === "sessionid") && parsed.deleted) {
         throw errors.tokenInvalidated;
       }
     }

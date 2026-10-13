@@ -158,7 +158,11 @@ class Client extends EventEmitter {
     let res = await this.http.request(this.endpoints.messages, { method: "GET", headers });
     const html = await this._bootstrapPage(res);
 
-    if (html.includes('"USER_ID":"0"') && !this.cookies.isLoggedIn()) {
+    // mautrix-meta's ModuleParser treats a Messenger bootstrap page that
+    // reports `"USER_ID":"0"` as ErrUserIDIsZero (an ErrTokenInvalidated): the
+    // session was rejected even though the request succeeded. Match that rather
+    // than only failing when the cookie jar also looks logged out.
+    if (html.includes('"USER_ID":"0"')) {
       throw errors.tokenInvalidated;
     }
     if (html.includes("/checkpoint/block/?next")) {
@@ -208,6 +212,9 @@ class Client extends EventEmitter {
       if (locationURL.pathname === "/consent/" || locationURL.pathname.startsWith("/privacy/consent/")) {
         throw new RedirectedError(errors.consentRequired, locationURL.toString());
       }
+      if (locationURL.pathname === "/login.php") {
+        throw new RedirectedError(errors.tokenInvalidated, locationURL.toString());
+      }
       const headers = this.http.buildHeaders({ withCookies: true, isSecFetchDocument: true });
       headers["referer"] = this.endpoints.base_url + "/";
       res = await this.http.request(locationURL.toString(), { method: "GET", headers });
@@ -237,6 +244,7 @@ class Client extends EventEmitter {
           this.configs.lsd = lsdMatch[1];
           this.http.configs.lsd = lsdMatch[1];
         }
+        this._lastTokenRefresh = Date.now();
         return { fb_dtsg: this.configs.dtsg, jazoest: this.configs.jazoest };
       } catch (_) { /* try next source */ }
     }
@@ -525,6 +533,9 @@ class Client extends EventEmitter {
       if (err && err.closeCode === 4003) {
         err.message = "Not logged in.";
         this.permanentErrored = true;
+        // mautrix stops the force-refresh loop on PermanentErrorEvent; a stopped
+        // client must not schedule another full reconnect for a revoked session.
+        this._stopPeriodicReconnect();
         this._emitError(err);
         this.emit("permanent-error", err);
         this._clearCanSendMessagesWaiters();
@@ -537,20 +548,13 @@ class Client extends EventEmitter {
         return;
       }
 
-      if (!err && !this._firstConnectSettled) {
-        this._firstConnectSettled = true;
-        if (this._connectResolve) {
-          const resolve = this._connectResolve;
-          this._connectResolve = null;
-          this._connectReject = null;
-          resolve();
-        }
-      }
+      if (!err) this._settleFirstConnect();
 
       this.emit("transient-disconnect", { error: err, connectionAttempts });
       if (this.options.autoReconnect === false) {
         const stopErr = err || new Error("connection closed");
         this.permanentErrored = true;
+        this._stopPeriodicReconnect();
         this._emitError(stopErr);
         this.emit("permanent-error", stopErr);
         this._clearCanSendMessagesWaiters();
@@ -613,18 +617,42 @@ class Client extends EventEmitter {
   // reconnect, and gated by canReconnect() so it cannot thrash.
   onStaleSession() {
     if (this.permanentErrored || this._stopping || !this._loggedIn) return;
-    if (this._staleReconnectPending) return;
+    if (this._staleReconnectPending || this._staleRefreshPromise) return;
     this._staleReconnectPending = true;
-    const timer = setTimeout(() => {
+    this._staleReconnectTimer = setTimeout(() => {
+      this._staleReconnectTimer = null;
       this._staleReconnectPending = false;
       if (this._stopping || this.permanentErrored) return;
-      if (this.canReconnect()) {
-        this.fullReconnect().catch((e) => this._emitError(e));
-      } else {
-        this.refreshTokens().catch(() => {});
-      }
+      this.refreshStaleSession().catch((e) => this._emitError(e));
     }, 1500);
-    if (timer.unref) timer.unref();
+    if (this._staleReconnectTimer.unref) this._staleReconnectTimer.unref();
+  }
+
+  // Awaitable stale-session recovery. mautrix re-reads the bootstrap page
+  // (full reconnect) before retrying the failed request; when a full reconnect
+  // is not allowed yet it at least re-fetches the dtsg/lsd tokens. Concurrent
+  // callers share a single in-flight recovery so a burst of 1357001/1357004
+  // responses does not start several reconnects.
+  refreshStaleSession() {
+    if (this._staleRefreshPromise) return this._staleRefreshPromise;
+    // Cancel any debounced onStaleSession timer so an awaited recovery (e.g. the
+    // upload retry) does not fire a second reconnect afterwards.
+    if (this._staleReconnectTimer) {
+      clearTimeout(this._staleReconnectTimer);
+      this._staleReconnectTimer = null;
+      this._staleReconnectPending = false;
+    }
+    const run = async () => {
+      try {
+        if (this.permanentErrored || this._stopping || !this._loggedIn) return;
+        if (this.canReconnect()) await this.fullReconnect();
+        else await this.refreshTokens();
+      } finally {
+        this._staleRefreshPromise = null;
+      }
+    };
+    this._staleRefreshPromise = run();
+    return this._staleRefreshPromise;
   }
 
   async _openSocket() {
@@ -651,6 +679,12 @@ class Client extends EventEmitter {
     this.connected = true;
     this._socketWasConnected = true;
     this.emit("connected");
+    // mautrix's messagix Client.Connect returns as soon as the socket is up and
+    // runs the read loop in a goroutine. Resolve the connect() promise here, at
+    // "ready", instead of only after the socket closes: otherwise connect()
+    // never settles while the session is healthy and fullReconnect() (used by
+    // the stale-session upload recovery) blocks forever.
+    this._settleFirstConnect();
 
     // Keep the loop alive until the socket actually closes. The socket emits
     // "close" once per connection, which resolves this promise.
@@ -671,6 +705,20 @@ class Client extends EventEmitter {
       socket.once("close", onClose);
     });
     if (closeErr) throw closeErr;
+  }
+
+  _settleFirstConnect(err) {
+    if (this._firstConnectSettled) return;
+    this._firstConnectSettled = true;
+    const resolve = this._connectResolve;
+    const reject = this._connectReject;
+    this._connectResolve = null;
+    this._connectReject = null;
+    if (err) {
+      if (reject) reject(err);
+    } else if (resolve) {
+      resolve();
+    }
   }
 
   async _onSocketConnect() {
@@ -704,6 +752,11 @@ class Client extends EventEmitter {
     if (this._periodicReconnectTimer) {
       clearTimeout(this._periodicReconnectTimer);
       this._periodicReconnectTimer = null;
+    }
+    if (this._staleReconnectTimer) {
+      clearTimeout(this._staleReconnectTimer);
+      this._staleReconnectTimer = null;
+      this._staleReconnectPending = false;
     }
   }
 
