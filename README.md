@@ -2,8 +2,8 @@
 <h1 align="center"><img src="./dashboard/images/logo-non-bg.png" width="22px"> Goat Bot - Bot Chat Messenger</h1>
 
 <p align="center">
-	<a href="https://nodejs.org/dist/v16.20.0">
-		<img src="https://img.shields.io/badge/Nodejs%20Support-16.x-brightgreen.svg?style=flat-square" alt="Nodejs Support v16.x">
+	<a href="https://nodejs.org/dist/v20.18.1">
+		<img src="https://img.shields.io/badge/Nodejs%20Support-20.x-brightgreen.svg?style=flat-square" alt="Nodejs Support v20.x">
 	</a>
   <img alt="size" src="https://img.shields.io/github/repo-size/ntkhang03/Goat-Bot-V2.svg?style=flat-square&label=size">
   <img alt="code-version" src="https://img.shields.io/badge/dynamic/json?color=brightgreen&label=code%20version&prefix=v&query=%24.version&url=https://github.com/ntkhang03/Goat-Bot-V2/raw/main/package.json&style=flat-square">
@@ -33,8 +33,14 @@
 - So, I recommend using a clone account (one that you're willing to throw away at any time)
 - ***I am not responsible for any problems that may arise from using this bot.***
 
+### 📡 **Session reliability (fca-meta)**
+- This build vendors [`fca-meta`](./fca-meta) as the chat API. It speaks the current Meta Lightspeed/DGW protocol and mirrors the reference client [mautrix-meta](https://github.com/mautrix/meta), so it avoids the logout/suspend issues of the legacy MQTT endpoint.
+- **Cookie rotation** is applied on every HTTP response (mautrix `Cookies.UpdateFromResponse`), and `autoRefreshFbstate` persists the rotated cookies back to `account.txt`, so short-lived cookies (`fr`, `sb`) never go stale on a long-running bot.
+- **Stale bootstrap recovery**: a request rejected with `1357001`/`1357004` (the "text works but uploads don't" case) triggers one full reconnect that re-reads the bootstrap page and retries, instead of failing every later request.
+- **Periodic reconnect** (mautrix `periodicReconnect`) force-refreshes the session every 20h by default, so tokens and sync cursors never go stale.
+
 ## 🚧 **Requirement**
-- Node.js 16.x [Download](https://nodejs.org/dist/v16.20.0) | [Home](https://nodejs.org/en/download/) | [Other versions](https://nodejs.org/en/download/releases/)
+- Node.js 20.x [Download](https://nodejs.org/dist/v20.18.1) | [Home](https://nodejs.org/en/download/) | [Other versions](https://nodejs.org/en/download/releases/)
 - Knowledge of **programming**, javascript, nodejs, unofficial facebook api
 
 ## 📝 **Tutorial**

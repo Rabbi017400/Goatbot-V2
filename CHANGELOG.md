@@ -1,3 +1,16 @@
+## 📦 Version 1.5.36
+### ⬆️ What's Changed
+- **fca-meta/src/client.js**: fix `connect()`/`fullReconnect()` hanging (resolve on socket ready) so stale-session recovery works
+- **fca-meta/src/cookies.js**: add cookie rotation from `Set-Cookie` (mautrix `Cookies.UpdateFromResponse`)
+- **fca-meta/src/http.js**: apply cookie rotation per response, treat `/login.php` redirect as token invalidated
+- **fca-meta/src/api/http.js**: retry GraphQL/Mercury requests once after a stale-session recovery (`1357001`/`1357004`)
+- **fca-meta/src/api/upload.js**: rebuild upload query and recover the stale bootstrap so uploads work on long sessions
+- **fca-meta/src/socket/client.js**: surface a DGW deauth frame as an unauthorized close
+- **README.md / DOCS.md**: document the fca-meta session-reliability behaviour, update Node requirement to 20.x
+### Contributors
+- <div style="display: flex; align-items: center;"><a href="https://github.com/lazyneoaz">lazyneoaz&nbsp;&nbsp;</a> <img src="https://github.com/lazyneoaz.png" width="20" height="20" style="border-radius:50%; margin-top: px;" alt="lazyneoaz"></div>
+
+---
 ## 📦 Version 1.5.35
 ### ⬆️ What's Changed
 - **fb-chat-api/index.js**: fix: fca not working

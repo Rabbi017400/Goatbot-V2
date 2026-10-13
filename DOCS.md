@@ -16,7 +16,7 @@ See [utils.js](https://github.com/ntkhang03/Goat-Bot-V2/blob/main/utils.js) for 
 <hr>
 
 ### **🧠 Prepare**
-- [Node.js](https://nodejs.org/en/download/) 16.x
+- [Node.js](https://nodejs.org/en/download/) 20.x
 - IDE or Text Editor (VSCode, Sublime Text, Atom, Notepad++, ...)
 - Knowledge of Javascript, Node.js, JSON,...
 - Knowledge of [Facebook Chat API Unofficial](https://github.com/ntkhang03/fb-chat-api/blob/master/DOCS.md)
