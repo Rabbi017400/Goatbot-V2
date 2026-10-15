@@ -431,13 +431,16 @@ without a new server API.
 
 ## Anti-suspension invariants (Goat-Bot-V2 side)
 
-- Device parity is mandatory: `bot/login/login.js` must pass
-  `facebookAccount.userAgent` and `facebookAccount.proxy` into the fca-meta
-  `login(..., options)` call. The Lightspeed socket/HTTP session must present the
-  same UA and exit IP that `getFbstate1.js` / `checkLiveCookie.js` used. The
-  original code dropped both, so the socket ran fca-meta's default desktop Chrome
-  UA from the host IP while login used a mobile UA through the proxy — a
-  device/location mismatch that is a strong logout and suspension signal.
+- Lightspeed is desktop-web only. Do NOT pass `config.json`'s
+  `facebookAccount.userAgent` (an Android Chrome UA) into the fca-meta
+  `login(..., options)` call. Forcing that UA onto the Lightspeed bootstrap makes
+  Facebook reject the session (`graphql request didn't return data`, error
+  1357004) and the account is logged out. fca-meta keeps its own desktop Chrome
+  UA, matching the reference client mautrix-meta. `bot/login/login.js` deletes
+  `userAgent` from the fca options for this reason.
+- DO pass `facebookAccount.proxy` into the fca-meta `login(..., options)` call so
+  the socket/HTTP traffic leaves from the same IP as the cookie login. IP parity
+  avoids a location-change signal; a UA mismatch is not the problem here.
 - `bot/login/checkLiveCookie.js` must never use the deprecated `mbasic`
   subdomain; it probes `https://www.facebook.com/` and treats missing essential
   cookies (`c_user` + `xs`) as the only hard "invalid" signal, so a transient

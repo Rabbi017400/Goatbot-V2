@@ -49,13 +49,24 @@ module.exports = async function (cookie, userAgent, proxy) {
                 };
                 // Probe through the same proxy as the bot session: a liveness check
                 // from a different (datacenter) host IP is itself a login-from-a-new-
-                // location signal, and the relogin poll fires it every 5s.
+                // location signal, and the relogin poll fires it every 5s. axios does
+                // not understand undici dispatchers, so use its native proxy config.
                 if (proxy) {
                         try {
-                                const { ProxyAgent } = require("undici");
-                                config.dispatcher = new ProxyAgent(proxy);
+                                const u = new URL(proxy);
+                                const isHttps = u.protocol === "https:";
+                                config.proxy = {
+                                        protocol: u.protocol.replace(":", ""),
+                                        host: u.hostname,
+                                        port: Number(u.port) || (isHttps ? 443 : 80),
+                                };
+                                if (u.username)
+                                        config.proxy.auth = {
+                                                username: decodeURIComponent(u.username),
+                                                password: decodeURIComponent(u.password || ""),
+                                        };
                         }
-                        catch (_) { /* no undici: fall back to a direct request */ }
+                        catch (_) { /* malformed proxy url: fall back to a direct request */ }
                 }
                 const response = await axios(config);
 

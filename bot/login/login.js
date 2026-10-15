@@ -496,7 +496,7 @@ async function getAppStateToLogin(loginWithEmail) {
 					}))
 					.filter(i => i.key && i.value && i.key != "x-referer");
 			}
-			if (!await checkLiveCookie(appState.map(i => i.key + "=" + i.value).join("; "), facebookAccount.userAgent, facebookAccount.proxy)) {
+			if (!await checkLiveCookie(appState.map(i => i.key + "=" + i.value).join("; "), undefined, facebookAccount.proxy)) {
 				const error = new Error("Cookie is invalid");
 				error.name = "COOKIE_INVALID";
 				throw error;
@@ -666,14 +666,19 @@ async function startBot(loginWithEmail) {
 
 		let isSendNotiErrorMessage = false;
 
-		// The Lightspeed session must present the SAME device as the login used to
-		// obtain the cookies. config.json's facebookAccount.userAgent/proxy were
-		// only ever used for the email/password and mbasic login requests; without
-		// them here the socket/HTTP session fell back to fca-meta's default desktop
-		// Chrome UA from a different IP, which is a strong logout/suspend signal.
+		// Pass the account's proxy through to the Lightspeed session so the socket
+		// and HTTP traffic leave from the same IP as the cookie login. IP parity
+		// avoids a location-change signal on the session.
+		//
+		// Do NOT pass facebookAccount.userAgent: the Lightspeed/DGW protocol is
+		// desktop-web only. config.json ships an Android Chrome UA, and forcing it
+		// onto the Lightspeed bootstrap makes Facebook reject the session
+		// ("graphql request didn't return data" / error 1357004), which logs the
+		// account out. fca-meta keeps its own desktop Chrome UA, matching the
+		// reference client mautrix-meta.
 		const fcaOptions = Object.assign({}, global.GoatBot.config.optionsFca);
-		if (facebookAccount.userAgent && !fcaOptions.userAgent) fcaOptions.userAgent = facebookAccount.userAgent;
 		if (facebookAccount.proxy && !fcaOptions.proxy) fcaOptions.proxy = facebookAccount.proxy;
+		if (fcaOptions.userAgent) delete fcaOptions.userAgent;
 
 		login({ appState }, fcaOptions, async function (error, api) {
 			if (!isNaN(facebookAccount.intervalGetNewCookie) && facebookAccount.intervalGetNewCookie > 0)
@@ -960,7 +965,7 @@ async function startBot(loginWithEmail) {
 							if (intervalCheckLiveCookieAndRelogin == false) {
 								intervalCheckLiveCookieAndRelogin = true;
 								const interval = setInterval(async () => {
-									const cookieIsLive = await checkLiveCookie(cookieString, facebookAccount.userAgent, facebookAccount.proxy);
+									const cookieIsLive = await checkLiveCookie(cookieString, undefined, facebookAccount.proxy);
 									if (cookieIsLive) {
 										clearInterval(interval);
 										clearInterval(countTimes);

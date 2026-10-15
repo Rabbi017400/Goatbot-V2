@@ -421,6 +421,24 @@ class Client extends EventEmitter {
 
   _parseLSResponse(graphQLData) {
     if (!graphQLData) throw new Error("graphql request didn't return data");
+    // mautrix-meta checks the top-level ErrorCode first (types.ErrorResponse):
+    // a Lightspeed rejection such as 1357004 ("please reload page") arrives as a
+    // top-level `error` field with no `data`, and must be surfaced as that error
+    // rather than as an opaque "didn't return data".
+    const errorCode = graphQLData.error !== undefined ? graphQLData.error : graphQLData.errorCode;
+    if (errorCode) {
+      const err = new Error(
+        `lightspeed request failed: ${errorCode}${
+          graphQLData.errorSummary || graphQLData.errorDescription
+            ? ` (${[graphQLData.errorSummary, graphQLData.errorDescription].filter(Boolean).join(" - ")})`
+            : ""
+        }`
+      );
+      err.error = errorCode;
+      err.errorCode = errorCode;
+      err.errorResponse = graphQLData;
+      throw err;
+    }
     const data = graphQLData.data;
     if (!data) {
       if (graphQLData.errors) throw new Error(JSON.stringify(graphQLData.errors));
