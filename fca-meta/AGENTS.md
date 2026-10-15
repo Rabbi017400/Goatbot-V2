@@ -49,12 +49,10 @@ Regenerate both together; do not hand-edit generated output.
 
 - The account cookie array lives in `.tmp-account.json` (gitignored).
   Load a real `Client` with `cookiesFromAppState(require("./.tmp-account.json"))`.
-- `tools/live-test.js` is the end-to-end self-test: one login against
-  `.tmp-account.json`, then identity, `getSessionID`, `getCookies`/`getAppState`,
-  effects, `listenMqtt` (real DGW event stream), thread list/info/history,
-  send/edit/react/poll/typing/markAsRead/getUserInfo, cleanup, and logout.
-  Run `node tools/live-test.js`. It is safe/isolated: no
-  comments, minimal sends, and it cleans up after itself.
+- `tools/live-test.js` was removed and does NOT exist in this tree; `tools/`
+  only contains the generators (`gen-tables.js`, `gen-decoders.js`,
+  `tables-spec.json`) and `integration-session.js` (networkless no-persistence
+  wiring check). Do not reference a live self-test that is not present.
 - `sendMessage` before `listenMqtt` works: `Client.sendTasks` lazily starts
   the socket via `_ensureConnectStarted()`. Do not remove that call.
 - Send-message ids come back through `LSReplaceOptimsiticMessage` in the
@@ -342,9 +340,10 @@ without a new server API.
 `require(global.config.facebookAccount?.fcaApiPath || "fca-meta")`, so the legacy
 `modify` command still overrides the API path under the same `fcaApiPath` key.
 
-- Legacy api surface parity: all 52 `apiFuncNames` from `fb-chat-api/index.js`
-  are exposed by `index.js`. `getThreadInfo` returns `null` (not a throw) when
-  there is no `message_thread`, matching legacy; callers must null-check.
+- Legacy api surface parity: all `apiFuncNames` from `fb-chat-api/index.js`
+  are exposed by `index.js` (77 distinct `api.*` members here). `getThreadInfo`
+  returns `null` (not a throw) when there is no `message_thread`, matching
+  legacy; callers must null-check.
 - `listenMqtt` returns the legacy `msgEmitter` shape (`stopListening(cb)` /
   `stopListeningAsync()`); the default no-op `api.stopListening` is replaced by
   the handle on first `listenMqtt` call, matching legacy.
@@ -432,14 +431,25 @@ without a new server API.
 
 ## Anti-suspension invariants (Goat-Bot-V2 side)
 
+- Device parity is mandatory: `bot/login/login.js` must pass
+  `facebookAccount.userAgent` and `facebookAccount.proxy` into the fca-meta
+  `login(..., options)` call. The Lightspeed socket/HTTP session must present the
+  same UA and exit IP that `getFbstate1.js` / `checkLiveCookie.js` used. The
+  original code dropped both, so the socket ran fca-meta's default desktop Chrome
+  UA from the host IP while login used a mobile UA through the proxy — a
+  device/location mismatch that is a strong logout and suspension signal.
 - `bot/login/checkLiveCookie.js` must never use the deprecated `mbasic`
   subdomain; it probes `https://www.facebook.com/` and treats missing essential
   cookies (`c_user` + `xs`) as the only hard "invalid" signal, so a transient
   anti-bot redirect cannot trigger a spurious re-login/logout.
 - The listen-error re-login poll in `bot/login/login.js` is bounded to 5 minutes
   (`reloginDeadline`); it must not poll `checkLiveCookie` forever every 5s.
-- `fca-meta/tools/live-test.js` only calls `api.logout()` when
-  `FCA_LIVE_LOGOUT=1`. Never auto-logout on a normal test run.
+- `checkLiveCookie(cookie, userAgent, proxy)` probes through the account's proxy
+  when one is configured, so the liveness check is not seen as a login from a
+  different IP.
+- There is no `fca-meta/tools/live-test.js` in this tree (see above). Never
+  auto-logout on a normal run; do not add a live self-test that calls
+  `api.logout()`.
 - Do not add any code path that calls `api.logout()` automatically; the only
   logout in the bot is the dashboard session (`dashboard/app.js`, unrelated).
 
@@ -496,7 +506,11 @@ without a new server API.
 - `api.sendMessage(msg, threadID, callback, replyToMessage, isGroup)`: the 3rd argument is treated as `replyToMessage` only when it is a string (the legacy `(msg, threadID, replyToMessage)` overload). `message.reply` calls `api.sendMessage(form, threadID, callback, event.messageID)`; when a command omits the callback (the common case) the 3rd arg is `undefined`, so the reply target lives in the 4th argument and must not be overwritten. `msg.replyToMessage` is also accepted for callers that pass the target inside the message object.
 - `api.setMessageReaction(reaction, messageID, threadID, callback, forceCustomReaction)`: `threadID` is optional. Legacy/dongdev bots call `setMessageReaction(reaction, messageID)` and the handler looks the thread up from `_messageThreadMap`; Lightspeed does not need `thread_key` (mautrix tags it `omitempty`). When the thread is unknown the field is omitted rather than sent as `0`. Any Unicode emoji is accepted (`src/api/messageActions.js` `isEmojiReaction` uses `\p{Extended_Pictographic}` + `\p{Emoji_Component}`), the reaction is sent as `reaction_style: null` (the plain Messenger reaction), and an empty string removes the reaction. There is no force-custom path. The `forceCustomReaction` argument is still parsed for call-signature compatibility but ignored, so bots that pass it (e.g. Goat-Bot-V2 `utils.js` `setMessageReaction(emoji, id, cb, true)`) keep working.
 - `EventFormatter.processTable` deduplicates messages and reactions by id (`_isDuplicateMessage` / `_isDuplicateReaction`). Lightspeed sync databases and the socket can redeliver the same row, which made Goat-Bot-V2 fire `log:subscribe` (welcome) multiple times and run commands repeatedly. The message window is 60s; reactions 3s. Reaction dedupe keys normalize away U+FE0F so a V1 `❤` and a V2 `❤️` for the same actor/message collapse into one `message_reaction`; V2 rows are only emitted when `ViewerIsReactor` is set (the sync row for the peer's own reaction carries no reactor id).
-- `DEFAULT_SAFETY` typing/pacing was lowered (`typingMsPerChar` 20, `typingMaxMs` 1500, `minActionDelayMs` 250, `maxActionDelayMs` 800) so a normal text reply is not delayed by up to 5s of simulated typing.
+- The old `DEFAULT_SAFETY` typing/pacing layer was removed entirely; there is no
+  simulated typing delay on a normal send. Typing is only emitted when the caller
+  opts in with `options.typingIndicator: true` (constants `TYPING_MS_PER_CHAR`
+  20, `TYPING_MIN_MS` 250, `TYPING_MAX_MS` 1500 in `src/api/sendMessage.js`), so
+  a normal text reply is never delayed.
 - `Client.sendStatelessTask` serializes with `stringifyBigInt`, not `JSON.stringify`. Typing/presence tasks carry `thread_key`; for int64 thread ids beyond `Number.MAX_SAFE_INTEGER` the value is a `BigInt` and raw `JSON.stringify` throws `Do not know how to serialize a BigInt`. `simulateTyping` swallows errors, so the symptom was a missing typing indicator on exactly the large-ID threads the bot had just started working in. `sendTasks` was already safe via `TaskManager.finalizePayload` (`stringifyBigInt`).
 - `event.messageReply.attachments` is populated, not hardcoded `[]`. It prefers the cached attachments of `ReplySourceId` (full `PlayableUrl`/`PreviewUrl` from `LSInsertAttachment`), else synthesizes one attachment from the inline reply media fields (`ReplyAttachmentType`, `ReplyAttachmentId`, `ReplyMediaUrl`, `ReplyMediaUrlMimeType`, `ReplyMediaPreviewWidth/Height`), and returns `[]` for a text-only reply. `_attachmentType` is reused so a reply sticker maps to `sticker` with `stickerID`.
 

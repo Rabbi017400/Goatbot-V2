@@ -27,9 +27,10 @@ function hasEssentialCookies(input) {
  *
  * @param {string|Array} cookie Cookie string as `c_user=123;xs=123;datr=123;` format or an appState array
  * @param {string} userAgent User agent string
+ * @param {string} [proxy] Proxy URL the account uses, so the probe does not leak a different host IP
  * @returns {Promise<Boolean>} True if cookie is valid, false if not
  */
-module.exports = async function (cookie, userAgent) {
+module.exports = async function (cookie, userAgent, proxy) {
         const cookieString = toCookieString(cookie);
         if (!hasEssentialCookies(cookie))
                 return false;
@@ -39,13 +40,24 @@ module.exports = async function (cookie, userAgent) {
                 // (the old hardcoded mobile-UA/desktop-Edge-hints mix looked like a
                 // different device and could get the account flagged).
                 const headers = Object.assign({ cookie: cookieString }, buildDocumentHeaders(userAgent || USER_AGENT));
-                const response = await axios({
+                const config = {
                         url: 'https://www.facebook.com/',
                         method: "GET",
                         timeout: 15000,
                         maxRedirects: 5,
                         headers
-                });
+                };
+                // Probe through the same proxy as the bot session: a liveness check
+                // from a different (datacenter) host IP is itself a login-from-a-new-
+                // location signal, and the relogin poll fires it every 5s.
+                if (proxy) {
+                        try {
+                                const { ProxyAgent } = require("undici");
+                                config.dispatcher = new ProxyAgent(proxy);
+                        }
+                        catch (_) { /* no undici: fall back to a direct request */ }
+                }
+                const response = await axios(config);
 
                 const data = String(response.data || "");
                 const live = data.includes('"__isLoggedIn":true') || data.includes('/privacy/xcs/action/logging/');

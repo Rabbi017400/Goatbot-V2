@@ -902,7 +902,15 @@ class Client extends EventEmitter {
   async _syncSocketData(databaseID) {
     const db = this.syncManager.store[databaseID];
     if (!db) return;
-    await this._recursivelySyncSocketData(databaseID, db, null, 0);
+    try {
+      await this._recursivelySyncSocketData(databaseID, db, null, 0);
+    } catch (err) {
+      // mautrix-meta only lets a database-1 sync failure surface as a connection
+      // error (syncSocketData sets outErr for db 1); the other databases just log.
+      // The old code returned silently, so a dead socket looked "synced".
+      if (databaseID === 1) throw err;
+      this.emit("sync-error", { databaseID, error: err });
+    }
   }
 
   async _recursivelySyncSocketData(databaseID, db, stream, depth) {
