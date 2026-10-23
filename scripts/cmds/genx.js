@@ -196,7 +196,7 @@ module.exports = {
   config: {
     name: "genx",
     version: "2.1.0",
-    author: "Neoaz 🐊",
+    author: "Neoaz 🐊",//do not change credits ❌ 
     countDown: 5,
     role: 0,
     shortDescription: { en: "NEOKEX GENX image and video generator" },
