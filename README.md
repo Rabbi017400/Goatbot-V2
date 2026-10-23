@@ -1,18 +1,25 @@
 <img src="https://i.ibb.co/RQ28H2p/banner.png" alt="banner">
 <h1 align="center"><img src="./dashboard/images/logo-non-bg.png" width="22px"> Goat Bot - Bot Chat Messenger</h1>
+<p align="center"><b>Modified and enhanced by <a href="https://github.com/lazyneoaz">@lazyneoaz</a></b></p>
 
 <p align="center">
 	<a href="https://nodejs.org/dist/v20.18.1">
 		<img src="https://img.shields.io/badge/Nodejs%20Support-20.x-brightgreen.svg?style=flat-square" alt="Nodejs Support v20.x">
 	</a>
-  <img alt="size" src="https://img.shields.io/github/repo-size/ntkhang03/Goat-Bot-V2.svg?style=flat-square&label=size">
-  <img alt="code-version" src="https://img.shields.io/badge/dynamic/json?color=brightgreen&label=code%20version&prefix=v&query=%24.version&url=https://github.com/ntkhang03/Goat-Bot-V2/raw/main/package.json&style=flat-square">
-  <img alt="visitors" src="https://visitor-badge.laobi.icu/badge?style=flat-square&page_id=ntkhang3.Goat-Bot-V2">
-  <img alt="size" src="https://img.shields.io/badge/license-MIT-green?style=flat-square&color=brightgreen">
+  <img alt="size" src="https://img.shields.io/github/repo-size/lazyneoaz/Goatbot-V2.svg?style=flat-square&label=size">
+  <img alt="code-version" src="https://img.shields.io/badge/dynamic/json?color=brightgreen&label=code%20version&prefix=v&query=%24.version&url=https://github.com/lazyneoaz/Goatbot-V2/raw/main/package.json&style=flat-square">
+  <img alt="stars" src="https://img.shields.io/github/stars/lazyneoaz/Goatbot-V2.svg?style=flat-square&label=stars">
+  <img alt="forks" src="https://img.shields.io/github/forks/lazyneoaz/Goatbot-V2.svg?style=flat-square&label=forks">
+  <img alt="watchers" src="https://img.shields.io/github/watchers/lazyneoaz/Goatbot-V2.svg?style=flat-square&label=watchers">
+  <img alt="last-commit" src="https://img.shields.io/github/last-commit/lazyneoaz/Goatbot-V2.svg?style=flat-square&label=last%20commit">
+  <img alt="visitors" src="https://visitor-badge.laobi.icu/badge?style=flat-square&page_id=lazyneoaz.Goatbot-V2">
+  <img alt="license" src="https://img.shields.io/badge/license-MIT-green?style=flat-square&color=brightgreen">
 </p>
 
 - [📝 **Note**](#-note)
 - [🚧 **Requirement**](#-requirement)
+- [✨ **Features (fca-meta build)**](#-features-fca-meta-build)
+- [📡 **Chat API — fca-meta**](#-chat-api--fca-meta)
 - [📝 **Tutorial**](#-tutorial)
 - [💡 **How it works?**](#-how-it-works)
 - [🔔 **How to get notification when have new update?**](#-how-to-get-notification-when-have-new-update)
@@ -34,14 +41,67 @@
 - ***I am not responsible for any problems that may arise from using this bot.***
 
 ### 📡 **Session reliability (fca-meta)**
-- This build vendors [`fca-meta`](./fca-meta) as the chat API. It speaks the current Meta Lightspeed/DGW protocol and mirrors the reference client [mautrix-meta](https://github.com/mautrix/meta), so it avoids the logout/suspend issues of the legacy MQTT endpoint.
+- This build uses the [`fca-meta`](https://www.npmjs.com/package/fca-meta) npm package (`0.0.1`) as the chat API. It speaks the current Meta Lightspeed/DGW protocol and mirrors the reference client [mautrix-meta](https://github.com/mautrix/meta), so it avoids the logout/suspend issues of the legacy MQTT endpoint.
 - **Cookie rotation** is applied on every HTTP response (mautrix `Cookies.UpdateFromResponse`), and `autoRefreshFbstate` persists the rotated cookies back to `account.txt`, so short-lived cookies (`fr`, `sb`) never go stale on a long-running bot.
 - **Stale bootstrap recovery**: a request rejected with `1357001`/`1357004` (the "text works but uploads don't" case) triggers one full reconnect that re-reads the bootstrap page and retries, instead of failing every later request.
 - **Periodic reconnect** (mautrix `periodicReconnect`) force-refreshes the session every 20h by default, so tokens and sync cursors never go stale.
 
 ## 🚧 **Requirement**
-- Node.js 20.x [Download](https://nodejs.org/dist/v20.18.1) | [Home](https://nodejs.org/en/download/) | [Other versions](https://nodejs.org/en/download/releases/)
+- **Node.js 20.x or newer is required** — this build targets the modern runtime, and the prebuilt `canvas`/`sqlite3` binaries need Node 20+. [Download](https://nodejs.org/dist/v20.18.1) | [Home](https://nodejs.org/en/download/) | [Other versions](https://nodejs.org/en/download/releases/)
 - Knowledge of **programming**, javascript, nodejs, unofficial facebook api
+
+## ✨ **Features (fca-meta build)**
+
+This fork adds Messenger features that the stock Goat-Bot-V2 does not ship. Each one is a ready command under `scripts/cmds/`.
+
+| Command | Aliases | What it does |
+| --- | --- | --- |
+| `music` | `ms`, `msticker` | Search the Messenger catalogue and send a song as a real **music sticker**. `-c <count>` shows a picker; reply with a number to choose. |
+| `effect` | `effects`, `pow` | Send a Messenger **text effect / power-up** (love, gift box, confetti, fire, celebration, ...). `list` shows every effect. |
+| avatar effects | via `effect` | Send an **avatar effect** (`avatar_love`, `avatar_anger`, `avatar_laugh`, `avatar_cry`) with a bundled GIF. |
+| `sing` | — | Send an actual **audio file** for a query. `-c <count>` shows a picker. |
+| `bump` | `b` | **Bump** a replied message back to the top of the thread. |
+| `unsendonreaction` | `uor` | Auto-**unsend a bot message** when an admin reacts with a configured emoji. |
+| `noprefix` | `np` | Let admins run commands with **no prefix** when the first word is an exact command name/alias. |
+| `wl` / `sl` | `whitelistmode` / `selflistenmode` | Toggle **whitelist** and **self-listen** modes at runtime. |
+| `pending` | — | Review and **accept/decline message requests**. |
+| `shell` | `sh`, `exec`, `run` | Run **shell commands** from chat (admin only). |
+| `uptime` | `up`, `runtime`, `sysinfo` | Show **uptime and system info** (sent as an avatar effect). |
+
+Other additions: **cookie rotation** back to `account.txt`, **stale-session recovery**, **full/periodic reconnect**, and a reworked **event formatter** that keeps the legacy `fb-chat-api` event shape and de-duplicates replayed messages.
+
+## 📡 **Chat API — fca-meta**
+
+The bot loads its chat API from the published [`fca-meta`](https://www.npmjs.com/package/fca-meta) package:
+
+```bash
+npm install
+```
+
+`bot/login/login.js` resolves it as a normal dependency:
+
+```js
+const login = require("fca-meta");
+```
+
+`fca-meta` is `fb-chat-api` compatible, so the bot's existing `api.sendMessage` / `api.listenMqtt` code needs no changes. It is backed by a hosted `fca-meta-server` that holds the protocol implementation, and your cookies are only used to establish your own session (encrypted at rest).
+
+- **Session** — cookie/appState login, realtime listening, `getAppState`, `refreshFb_dtsg`, `forceReconnect`, `logout`.
+- **Messaging** — `sendMessage`, `editMessage`, `unsendMessage`, `setMessageReaction`, `bumpMessage`/`bumpThread`, polls, attachments.
+- **Music & effects** — `searchMusic`, `sendMusicSticker`, `sendEffect`, `sendAvatarEffect`.
+- **Themes** — `createAITheme`, `setThreadTheme`, `changeTheme`.
+- **Threads & users** — thread list/info/history, nickname, colour, emoji, admin, block, friend requests.
+
+To point at your own server, add to `config.json`:
+
+```json
+{
+  "chatApiServer": {
+    "url": "https://your-server.example.com",
+    "apiKey": "your-shared-key"
+  }
+}
+```
 
 ## 📝 **Tutorial**
 Tutorial has been uploaded on YouTube
@@ -292,7 +352,8 @@ If you have major coding issues with this bot, please join and ask for help.
 </details>
 
 ## ✨ **Copyright (C)**
-- **[NTKhang (NTKhang03)](https://github.com/ntkhang03)**
+- **[NTKhang (NTKhang03)](https://github.com/ntkhang03)** — original Goat-Bot-V2 author
+- **[lazyneoaz](https://github.com/lazyneoaz)** — modified and enhanced build (fca-meta chat API, music sticker / effect / bump features)
 
 ## 📜 **License**
 

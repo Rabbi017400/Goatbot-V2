@@ -15,7 +15,7 @@ const path = defaultRequire("path");
 const readline = defaultRequire("readline");
 const fs = defaultRequire("fs-extra");
 const toptp = defaultRequire("totp-generator");
-const login = defaultRequire(`${process.cwd()}/fca-meta`);
+const login = defaultRequire("fca-meta");
 const qr = new (defaultRequire("qrcode-reader"));
 const Canvas = defaultRequire("canvas");
 const https = defaultRequire("https");
@@ -51,6 +51,11 @@ const { log, logColor, getPrefix, createOraDots, jsonStringifyColor, getText, co
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const currentVersion = require(`${process.cwd()}/package.json`).version;
+let fcaMetaVersion = "0.0.1";
+try {
+	fcaMetaVersion = require("fca-meta/package.json").version;
+}
+catch (e) { /* keep the pinned default if the dependency is not installed yet */ }
 
 function centerText(text, length) {
 	const width = process.stdout.columns;
@@ -98,7 +103,7 @@ for (const text of title) {
 	const textColor = gradient("#FA8BFF", "#2BD2FF", "#2BFF88")(text);
 	centerText(textColor, text.length);
 }
-let subTitle = `GoatBot V2@${currentVersion}- A simple Bot chat messenger use personal account`;
+let subTitle = `GoatBot V2@${currentVersion} - fca-meta@${fcaMetaVersion} - A simple Bot chat messenger use personal account`;
 const subTitleArray = [];
 if (subTitle.length > maxWidth) {
 	while (subTitle.length > maxWidth) {
@@ -113,14 +118,18 @@ else {
 	subTitleArray.push(subTitle);
 }
 const author = ("Created by NTKhang with ♡");
+const modifiedBy = ("Modified and enhanced by @lazyneoaz (github.com/lazyneoaz)");
 const srcUrl = ("Source code: https://github.com/ntkhang03/Goat-Bot-V2");
+const forkUrl = ("Fork: https://github.com/lazyneoaz/Goatbot-V2");
 const fakeRelease = ("ALL VERSIONS NOT RELEASED HERE ARE FAKE");
 for (const t of subTitleArray) {
 	const textColor2 = gradient("#9F98E8", "#AFF6CF")(t);
 	centerText(textColor2, t.length);
 }
 centerText(gradient("#9F98E8", "#AFF6CF")(author), author.length);
+centerText(gradient("#FA8BFF", "#2BD2FF", "#2BFF88")(modifiedBy), modifiedBy.length);
 centerText(gradient("#9F98E8", "#AFF6CF")(srcUrl), srcUrl.length);
+centerText(gradient("#9F98E8", "#AFF6CF")(forkUrl), forkUrl.length);
 centerText(gradient("#f5af19", "#f12711")(fakeRelease), fakeRelease.length);
 
 let widthConsole = process.stdout.columns;

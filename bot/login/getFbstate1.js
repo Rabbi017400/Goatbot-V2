@@ -1,7 +1,8 @@
 const cheerio = require("cheerio");
 const qs = require('qs');
-const path = require('path');
-const { buildDocumentHeaders } = require(path.join(process.cwd(), "fca-meta/src/useragent"));
+// Browser fingerprint helpers live locally now that the chat API is the hosted
+// fca-meta npm package (it ships no local request code).
+const { buildDocumentHeaders } = require("./useragent.js");
 
 const targetCookie = "https://m.facebook.com/";
 const urlLoginCheckpoint = "https://m.facebook.com/login/checkpoint/?next=https://m.facebook.com/home.php?refsrc=deprecated";

@@ -1,8 +1,7 @@
 const axios = require("axios");
-const path = require("path");
-// fca-meta is vendored at the repo root (not in node_modules), so resolve it the
-// same way bot/login/login.js does instead of as a bare package specifier.
-const { USER_AGENT, buildDocumentHeaders } = require(path.join(process.cwd(), "fca-meta/src/useragent"));
+// Browser fingerprint helpers live locally now that the chat API is the hosted
+// fca-meta npm package (it ships no local request code).
+const { USER_AGENT, buildDocumentHeaders } = require("./useragent.js");
 
 function toCookieString(input) {
         if (typeof input === "string")
