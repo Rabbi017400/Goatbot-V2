@@ -41,7 +41,7 @@
 - ***I am not responsible for any problems that may arise from using this bot.***
 
 ### 📡 **Session reliability (fca-meta)**
-- This build uses the [`fca-meta`](https://www.npmjs.com/package/fca-meta) npm package (`0.0.1`) as the chat API. It speaks the current Meta Lightspeed/DGW protocol and mirrors the reference client [mautrix-meta](https://github.com/mautrix/meta), so it avoids the logout/suspend issues of the legacy MQTT endpoint.
+- This build uses the [`fca-meta`](https://www.npmjs.com/package/fca-meta) npm package (`0.0.1`) as the chat API. It speaks the current Meta Lightspeed/DGW protocol, so it avoids the logout/suspend issues of the legacy MQTT endpoint.
 - **Cookie rotation** is applied on every HTTP response (mautrix `Cookies.UpdateFromResponse`), and `autoRefreshFbstate` persists the rotated cookies back to `account.txt`, so short-lived cookies (`fr`, `sb`) never go stale on a long-running bot.
 - **Stale bootstrap recovery**: a request rejected with `1357001`/`1357004` (the "text works but uploads don't" case) triggers one full reconnect that re-reads the bootstrap page and retries, instead of failing every later request.
 - **Periodic reconnect** (mautrix `periodicReconnect`) force-refreshes the session every 20h by default, so tokens and sync cursors never go stale.
