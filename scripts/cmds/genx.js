@@ -237,6 +237,13 @@ module.exports = {
 
     const label = modelName || (model === MODELS.edit ? "edit" : "genx");
 
+    let styleValue = style;
+    let promptValue = prompt;
+    if (model === MODELS.edit && styleValue) {
+      styleValue = [styleValue, promptValue].filter(Boolean).join(" ").trim();
+      promptValue = "";
+    }
+
     if (image && !model.edit)
       return message.reply(`❌ ${label} can't edit images. Try: genx --m edit --s <preset>`);
     if (!image && !model.gen)
@@ -259,8 +266,8 @@ module.exports = {
 
     const params = {};
     if (image) params[ip] = image;
-    if (prompt) params.prompt = prompt;
-    if (style) params[model.style] = style;
+    if (promptValue) params.prompt = promptValue;
+    if (styleValue) params[model.style] = styleValue;
     if (typeof flags.ar === "string") applyAr(model, flags.ar, params);
     for (const key of Object.keys(flags)) {
       if (CONTROL.has(key) || key === "s" || key === "ar" || key === ip.toLowerCase()) continue;
